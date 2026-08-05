@@ -1,126 +1,158 @@
-'use client';
-
-import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { BobLogo } from '@/components/ui/BobLogo';
 import { Icon } from '@/components/ui/Icon';
-import { Button } from '@/components/ui/Button';
-import { hasAccount, hasPin } from '@/services/auth';
 
-type PermissionState = 'checking' | 'granted' | 'denied';
+const BENEFITS = [
+  {
+    icon: 'security',
+    title: 'Security that stays on',
+    text: 'Smart signals help keep every session protected without getting in your way.',
+  },
+  {
+    icon: 'bolt',
+    title: 'Everyday banking, simplified',
+    text: 'Move money, manage cards and see your whole financial life in one calm view.',
+  },
+  {
+    icon: 'support-agent',
+    title: 'Help when it matters',
+    text: 'Get clear answers and human support whenever you need a hand.',
+  },
+];
 
-/**
- * Entry screen — port of the Expo app's `app/index.tsx`.
- *
- * Gates on location permission (the native app treated this as mandatory for
- * fraud detection), then routes to the right auth screen based on what already
- * exists on this device:
- *   no account          -> register
- *   account but no PIN  -> password-login, then set-pin
- *   both present        -> PIN quick-login
- */
-export default function EntryScreen() {
-  const router = useRouter();
-  const [status, setStatus] = useState<PermissionState>('checking');
-
-  const routeToAuthEntry = useCallback(() => {
-    if (!hasAccount()) {
-      router.replace('/register');
-      return;
-    }
-    if (!hasPin()) {
-      router.replace('/password-login?next=set-pin');
-      return;
-    }
-    router.replace('/login');
-  }, [router]);
-
-  const requestPermission = useCallback(() => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      // No Geolocation API at all — don't strand the user on a dead screen.
-      setStatus('granted');
-      routeToAuthEntry();
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      () => {
-        setStatus('granted');
-        routeToAuthEntry();
-      },
-      () => setStatus('denied'),
-      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 300_000 }
-    );
-  }, [routeToAuthEntry]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function check() {
-      // The Permissions API lets us skip re-prompting when already granted.
-      if (typeof navigator !== 'undefined' && navigator.permissions) {
-        try {
-          const result = await navigator.permissions.query({
-            name: 'geolocation' as PermissionName,
-          });
-          if (cancelled) return;
-          if (result.state === 'granted') {
-            setStatus('granted');
-            routeToAuthEntry();
-            return;
-          }
-          if (result.state === 'denied') {
-            setStatus('denied');
-            return;
-          }
-        } catch {
-          /* Permissions API unsupported — fall through to a direct prompt */
-        }
-      }
-      if (!cancelled) requestPermission();
-    }
-
-    check();
-    return () => {
-      cancelled = true;
-    };
-  }, [requestPermission, routeToAuthEntry]);
-
-  if (status !== 'denied') {
-    return (
-      <div className="loading-screen">
-        <span className="spinner" style={{ width: 34, height: 34 }} />
-      </div>
-    );
-  }
-
+export default function LandingPage() {
   return (
-    <div className="screen">
-      <span className="blob blob--error" />
-      <div className="screen--centered" style={{ flex: 1 }}>
-        <div className="text-center" style={{ width: '100%' }}>
-          <div className="hero-icon hero-icon--error">
-            <Icon name="location-off" size={48} />
-          </div>
+    <main className="landing">
+      <div className="landing__glow landing__glow--orange" />
+      <div className="landing__glow landing__glow--blue" />
+      <div className="landing__grid" />
 
-          <h1 className="t-display-lg mb-sm">Location Required</h1>
-          <p className="t-body-lg c-variant mb-lg" style={{ padding: '0 8px' }}>
-            For security and fraud detection purposes, Bob World requires access to
-            your device&apos;s location to proceed.
+      <nav className="landing__nav" aria-label="Main navigation">
+        <Link href="/" className="landing__brand" aria-label="Bob World home">
+          <span className="landing__brand-mark">
+            <BobLogo size={34} />
+          </span>
+          <span>Bob World</span>
+        </Link>
+
+        <div className="landing__nav-links">
+          <a href="#why-bob-world">Why Bob World</a>
+          <a href="#security">Security</a>
+        </div>
+
+        <Link href="/login" className="landing__nav-login">
+          Sign in
+          <Icon name="arrow-forward" size={18} />
+        </Link>
+      </nav>
+
+      <section className="landing__hero" aria-labelledby="landing-title">
+        <div className="landing__copy">
+          <h1 id="landing-title">
+            Your money,
+            <span>moving with you.</span>
+          </h1>
+
+          <p className="landing__intro">
+            Bob World makes everyday banking clearer, with simple tools, thoughtful
+            security and a calmer way to stay in control.
           </p>
 
-          <div style={{ padding: '0 20px' }}>
-            <Button
-              label="Grant Permission"
-              icon="location-on"
-              onClick={requestPermission}
-            />
-            <p className="t-label-md c-variant mt-md">
-              If you previously blocked location, enable it for this site in your
-              browser&apos;s address-bar permissions, then tap again.
-            </p>
+          <div className="landing__actions">
+            <Link href="/register" className="landing__primary-action">
+              Get started
+              <Icon name="arrow-forward" size={20} />
+            </Link>
+            <Link href="/login" className="landing__secondary-action">
+              I already have an account
+            </Link>
+          </div>
+
+          <div className="landing__trust-line">
+            <span className="landing__trust-icon">
+              <Icon name="verified-user" size={17} />
+            </span>
+            <span>Built for confident, secure banking</span>
           </div>
         </div>
-      </div>
-    </div>
+
+        <div className="landing__visual" id="security" aria-label="Bob World security overview">
+          <div className="landing__visual-orbit landing__visual-orbit--one" />
+          <div className="landing__visual-orbit landing__visual-orbit--two" />
+
+          <div className="landing__signal-card landing__signal-card--top">
+            <span className="landing__signal-icon landing__signal-icon--blue">
+              <Icon name="lock" size={18} />
+            </span>
+            <span>
+              <strong>Always protected</strong>
+              <small>Trust signals active</small>
+            </span>
+            <span className="landing__signal-check">
+              <Icon name="check" size={15} />
+            </span>
+          </div>
+
+          <div className="landing__visual-card">
+            <div className="landing__visual-card-header">
+              <span className="landing__visual-label">Your financial pulse</span>
+              <span className="landing__visual-menu">
+                <Icon name="more-horiz" size={20} />
+              </span>
+            </div>
+
+            <div className="landing__visual-balance">₹24,680.00</div>
+            <div className="landing__visual-caption">
+              <span>Available balance</span>
+              <span className="landing__positive">+8.4%</span>
+            </div>
+
+            <div className="landing__chart" aria-hidden="true">
+              <span className="landing__chart-line" />
+              <span className="landing__chart-dot landing__chart-dot--one" />
+              <span className="landing__chart-dot landing__chart-dot--two" />
+              <span className="landing__chart-dot landing__chart-dot--three" />
+              <span className="landing__chart-dot landing__chart-dot--four" />
+            </div>
+
+            <div className="landing__visual-footer">
+              <span className="landing__footer-icon">
+                <Icon name="trending-up" size={16} />
+              </span>
+              <span>Good momentum this month</span>
+            </div>
+          </div>
+
+          <div className="landing__signal-card landing__signal-card--bottom">
+            <span className="landing__signal-icon landing__signal-icon--orange">
+              <Icon name="bolt" size={18} />
+            </span>
+            <span>
+              <strong>One clear view</strong>
+              <small>Balance, cards and more</small>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section className="landing__benefits" id="why-bob-world" aria-label="Bob World benefits">
+        {BENEFITS.map((benefit) => (
+          <article className="landing__benefit" key={benefit.title}>
+            <span className="landing__benefit-icon">
+              <Icon name={benefit.icon} size={22} />
+            </span>
+            <div>
+              <h2>{benefit.title}</h2>
+              <p>{benefit.text}</p>
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <footer className="landing__footer">
+        <span>Bob World</span>
+        <span>Banking made more human.</span>
+      </footer>
+    </main>
   );
 }

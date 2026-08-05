@@ -10,6 +10,8 @@ import { useAlert } from '@/context/AlertContext';
 import { useBalance } from '@/context/BalanceContext';
 import { useTelemetry } from '@/context/TelemetryContext';
 import { verifyPassword } from '@/services/auth';
+// verifyPassword now checks the *signed-in* session's account server-side —
+// see src/app/api/auth/verify-password/route.ts.
 
 /** Port of the Expo app's `(app)/password.tsx` — final transaction authorisation. */
 function PasswordScreen() {
@@ -33,12 +35,15 @@ function PasswordScreen() {
 
     setLoading(true);
     setTimeout(async () => {
-      if (!(await verifyPassword(password))) {
-        setLoading(false);
-        showAlert('Incorrect Password', 'Please enter your Bob World account password.');
+      const result = await verifyPassword(password);
+      setLoading(false);
+      if (!result.ok) {
+        showAlert(
+          'Incorrect Password',
+          result.error ?? 'Please enter your Bob World account password.'
+        );
         return;
       }
-      setLoading(false);
       updateBalance(parseFloat(amount));
       router.push(
         `/success?amount=${encodeURIComponent(amount)}&payeeName=${encodeURIComponent(

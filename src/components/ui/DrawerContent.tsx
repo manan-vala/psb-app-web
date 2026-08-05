@@ -6,7 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { Icon } from './Icon';
 import { Button } from './Button';
 import { AVATAR_URL } from '@/constants/mock';
-import { getProfile, logout } from '@/services/auth';
+import { getAuthStatus, logout } from '@/services/auth';
 
 const NAV_ITEMS = [
   { label: 'My Accounts', icon: 'account-balance', route: '/home' },
@@ -25,8 +25,9 @@ export function DrawerContent({ onClose }: { onClose: () => void }) {
   const [userName, setUserName] = useState('Bob World Customer');
 
   useEffect(() => {
-    const profile = getProfile();
-    if (profile?.fullName) setUserName(profile.fullName);
+    getAuthStatus().then((status) => {
+      if (status.profile?.fullName) setUserName(status.profile.fullName);
+    });
   }, []);
 
   return (

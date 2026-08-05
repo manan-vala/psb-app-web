@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { sha256 } from '@/services/auth';
+import { sha256 } from '@/lib/hash';
 
 const STORE_KEY = 'aegis_device_fingerprint';
 

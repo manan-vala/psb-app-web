@@ -1,159 +1,105 @@
 /**
- * Local, in-browser authentication store.
+ * Client-side auth API — talks to the Route Handlers under
+ * `src/app/api/auth/*`, which are backed by Postgres (Neon) and an httpOnly
+ * cookie session. No credentials or session state live in the browser
+ * anymore; every function here is a `fetch` call, which is why (unlike the
+ * old localStorage-backed version) every one of them is `async`.
  *
- * Web port of the Expo app's `services/auth.ts`. The app has no multi-user
- * backend (the server side is a single hardcoded demo user used for the
- * risk-telemetry pipeline), so account creation, password, and PIN live on
- * the client — here in `localStorage`, hashed with a per-credential random
- * salt via the Web Crypto API.
- *
- * Note on parity: the native app used `expo-secure-store` (Android Keystore /
- * iOS Keychain). The browser has no equivalent hardware-backed store, so
- * localStorage is the honest equivalent — the salted SHA-256 hashing is
- * preserved so raw credentials are never persisted either way.
+ * `credentials: 'include'` isn't set explicitly below because these are
+ * always same-origin requests (the API routes live in this same Next.js
+ * app) — the session cookie is sent automatically.
  */
-
-const KEYS = {
-  PROFILE: 'psb_auth_profile',
-  PASSWORD_SALT: 'psb_auth_password_salt',
-  PASSWORD_HASH: 'psb_auth_password_hash',
-  PIN_SALT: 'psb_auth_pin_salt',
-  PIN_HASH: 'psb_auth_pin_hash',
-  SESSION_ACTIVE: 'psb_auth_session_active',
-} as const;
 
 export interface UserProfile {
   fullName: string;
   mobile: string;
-  email?: string;
+  email?: string | null;
 }
 
-/* ------------------------------------------------------------------ */
-/* storage helpers (SSR-safe)                                          */
-/* ------------------------------------------------------------------ */
+export interface AuthStatus {
+  hasAccount: boolean;
+  hasPin: boolean;
+  isAuthenticated: boolean;
+  profile: UserProfile | null;
+}
 
-function getItem(key: string): string | null {
-  if (typeof window === 'undefined') return null;
+export interface AuthResult {
+  ok: boolean;
+  error?: string;
+  /** Present on PIN failures — surfaced so the UI can warn before lockout. */
+  attemptsRemaining?: number;
+  locked?: boolean;
+}
+
+async function postJson(path: string, body: unknown): Promise<AuthResult> {
   try {
-    return window.localStorage.getItem(key);
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: data.error ?? 'Something went wrong. Please try again.',
+        attemptsRemaining: data.attemptsRemaining,
+        locked: data.locked,
+      };
+    }
+    return { ok: true };
   } catch {
-    return null;
+    return { ok: false, error: 'Could not reach the server. Check your connection and try again.' };
   }
 }
 
-function setItem(key: string, value: string): void {
-  if (typeof window === 'undefined') return;
+/**
+ * Single round trip covering what used to be four separate localStorage
+ * reads (`hasAccount`, `hasPin`, `getProfile`, `isSessionActive`). Callers
+ * that only need one field still call this and destructure — it's one fetch
+ * either way.
+ */
+export async function getAuthStatus(): Promise<AuthStatus> {
   try {
-    window.localStorage.setItem(key, value);
+    const res = await fetch('/api/auth/status', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status check failed');
+    return (await res.json()) as AuthStatus;
   } catch {
-    /* quota / private mode — non-fatal for a demo */
+    // Fail closed on the routing decision (send to register) but don't crash
+    // the entry screen — the user can retry.
+    return { hasAccount: false, hasPin: false, isAuthenticated: false, profile: null };
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* crypto                                                              */
-/* ------------------------------------------------------------------ */
-
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+/** Creates the account and immediately signs the browser in via a session cookie. */
+export async function registerAccount(profile: UserProfile, password: string): Promise<AuthResult> {
+  return postJson('/api/auth/register', { ...profile, password });
 }
 
-function generateSalt(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return toHex(bytes);
+/** Password login by mobile number or email. Issues a session on success. */
+export async function loginWithPassword(identifier: string, password: string): Promise<AuthResult> {
+  return postJson('/api/auth/login', { identifier, password });
 }
 
-/** SHA-256 of `salt:value` — identical scheme to the Expo app. */
-export async function sha256(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return toHex(new Uint8Array(digest));
+/**
+ * Re-checks the signed-in user's password without touching the session.
+ * Used for step-up confirmation (e.g. before sending a transfer).
+ */
+export async function verifyPassword(password: string): Promise<AuthResult> {
+  return postJson('/api/auth/verify-password', { password });
 }
 
-async function hashWithSalt(value: string, salt: string): Promise<string> {
-  return sha256(`${salt}:${value}`);
+/** PIN quick-login. Issues a session on success; rate-limited server-side. */
+export async function verifyPin(pin: string): Promise<AuthResult> {
+  return postJson('/api/auth/pin/verify', { pin });
 }
 
-/* ------------------------------------------------------------------ */
-/* account                                                             */
-/* ------------------------------------------------------------------ */
-
-/** True once the user has created an account (name + password) in this browser. */
-export function hasAccount(): boolean {
-  return getItem(KEYS.PASSWORD_HASH) !== null;
+/** Sets/resets the signed-in user's PIN. Requires an active session. */
+export async function setPin(pin: string): Promise<AuthResult> {
+  return postJson('/api/auth/pin/set', { pin });
 }
 
-/** Creates the local account: stores profile + salted password hash. */
-export async function registerAccount(
-  profile: UserProfile,
-  password: string
-): Promise<void> {
-  const salt = generateSalt();
-  const hash = await hashWithSalt(password, salt);
-  setItem(KEYS.PROFILE, JSON.stringify(profile));
-  setItem(KEYS.PASSWORD_SALT, salt);
-  setItem(KEYS.PASSWORD_HASH, hash);
-}
-
-/** Checks a password attempt against the stored hash. */
-export async function verifyPassword(password: string): Promise<boolean> {
-  const salt = getItem(KEYS.PASSWORD_SALT);
-  const stored = getItem(KEYS.PASSWORD_HASH);
-  if (!salt || !stored) return false;
-  return (await hashWithSalt(password, salt)) === stored;
-}
-
-/* ------------------------------------------------------------------ */
-/* PIN                                                                 */
-/* ------------------------------------------------------------------ */
-
-/** True once the user has set a 4-digit PIN in this browser. */
-export function hasPin(): boolean {
-  return getItem(KEYS.PIN_HASH) !== null;
-}
-
-/** Sets (or resets) the local PIN. */
-export async function setPin(pin: string): Promise<void> {
-  const salt = generateSalt();
-  const hash = await hashWithSalt(pin, salt);
-  setItem(KEYS.PIN_SALT, salt);
-  setItem(KEYS.PIN_HASH, hash);
-}
-
-/** Checks a PIN attempt against the stored hash. */
-export async function verifyPin(pin: string): Promise<boolean> {
-  const salt = getItem(KEYS.PIN_SALT);
-  const stored = getItem(KEYS.PIN_HASH);
-  if (!salt || !stored) return false;
-  return (await hashWithSalt(pin, salt)) === stored;
-}
-
-/* ------------------------------------------------------------------ */
-/* profile & session                                                   */
-/* ------------------------------------------------------------------ */
-
-export function getProfile(): UserProfile | null {
-  const raw = getItem(KEYS.PROFILE);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as UserProfile;
-  } catch {
-    return null;
-  }
-}
-
-export function setSessionActive(active: boolean): void {
-  setItem(KEYS.SESSION_ACTIVE, active ? 'true' : 'false');
-}
-
-export function isSessionActive(): boolean {
-  return getItem(KEYS.SESSION_ACTIVE) === 'true';
-}
-
-/** Ends the current session. Account/PIN/password remain for next login. */
-export function logout(): void {
-  setSessionActive(false);
+/** Ends the current session server-side and clears the cookie. */
+export async function logout(): Promise<void> {
+  await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
 }

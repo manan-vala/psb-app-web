@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/Input';
 import { StepUpModal } from '@/components/ui/StepUpModal';
 import { useAlert } from '@/context/AlertContext';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { getProfile, setSessionActive, verifyPassword } from '@/services/auth';
+import { loginWithPassword } from '@/services/auth';
 
 /** Port of the Expo app's `(auth)/password-login.tsx`, with telemetry wired in. */
 function PasswordLoginScreen() {
@@ -36,7 +36,6 @@ function PasswordLoginScreen() {
     if (isPinReset) {
       router.replace('/set-pin');
     } else {
-      setSessionActive(true);
       router.replace('/home');
     }
   };
@@ -50,25 +49,14 @@ function PasswordLoginScreen() {
     setLoading(true);
     stopGyroSampling();
 
-    // 1. Verify credentials locally (single on-device demo account).
-    const profile = getProfile();
-    const identifierMatches =
-      !!profile &&
-      (profile.mobile === identifier.trim() ||
-        (profile.email ?? '').toLowerCase() === identifier.trim().toLowerCase());
-
-    if (!profile || !identifierMatches) {
+    // 1. Verify credentials against Postgres and issue a session.
+    const result = await loginWithPassword(identifier.trim(), password);
+    if (!result.ok) {
       setLoading(false);
       showAlert(
-        'Account not found',
-        'No account matches that mobile number or email in this browser.'
+        'Login Failed',
+        result.error ?? 'Please check your details and try again.'
       );
-      return;
-    }
-
-    if (!(await verifyPassword(password))) {
-      setLoading(false);
-      showAlert('Incorrect Password', 'The password you entered is incorrect. Please try again.');
       return;
     }
 

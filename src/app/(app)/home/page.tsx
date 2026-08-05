@@ -9,7 +9,7 @@ import { AVATAR_URL, RECENT_TRANSACTIONS, formatCurrency } from '@/constants/moc
 import { useBalance } from '@/context/BalanceContext';
 import { useDrawer } from '@/context/DrawerContext';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { getProfile } from '@/services/auth';
+import { getAuthStatus } from '@/services/auth';
 
 const QUICK_ACTIONS = [
   { label: 'Transfer', icon: 'swap-horiz', route: '/transfer' },
@@ -29,8 +29,9 @@ export default function HomeScreen() {
   const [name, setName] = useState('Rahul Kapoor');
 
   useEffect(() => {
-    const profile = getProfile();
-    if (profile?.fullName) setName(profile.fullName);
+    getAuthStatus().then((status) => {
+      if (status.profile?.fullName) setName(status.profile.fullName);
+    });
   }, []);
 
   return (

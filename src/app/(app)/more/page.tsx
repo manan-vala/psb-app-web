@@ -7,7 +7,7 @@ import { TopAppBar } from '@/components/ui/TopAppBar';
 import { AVATAR_URL } from '@/constants/mock';
 import { useAlert } from '@/context/AlertContext';
 import { useDrawer } from '@/context/DrawerContext';
-import { getProfile, logout } from '@/services/auth';
+import { getAuthStatus, logout } from '@/services/auth';
 
 const MENU_ITEMS = [
   { label: 'Fixed Deposits', icon: 'savings', route: '/fixed-deposits' },
@@ -29,8 +29,9 @@ export default function MoreScreen() {
   const [userName, setUserName] = useState('Bob World Customer');
 
   useEffect(() => {
-    const profile = getProfile();
-    if (profile?.fullName) setUserName(profile.fullName);
+    getAuthStatus().then((status) => {
+      if (status.profile?.fullName) setUserName(status.profile.fullName);
+    });
   }, []);
 
   return (
@@ -87,8 +88,8 @@ export default function MoreScreen() {
 
           <button
             className="btn btn--danger"
-            onClick={() => {
-              logout();
+            onClick={async () => {
+              await logout();
               router.replace('/login');
             }}
           >

@@ -8,7 +8,7 @@ import { AVATAR_URL } from '@/constants/mock';
 import { useAlert } from '@/context/AlertContext';
 import { useDrawer } from '@/context/DrawerContext';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { getProfile, logout, type UserProfile } from '@/services/auth';
+import { getAuthStatus, logout, type UserProfile } from '@/services/auth';
 
 /** Port of the Expo app's `(app)/settings.tsx`. */
 export default function SettingsScreen() {
@@ -21,7 +21,7 @@ export default function SettingsScreen() {
   const [pushEnabled, setPushEnabled] = useState(true);
 
   useEffect(() => {
-    setProfile(getProfile());
+    getAuthStatus().then((status) => setProfile(status.profile));
   }, []);
 
   const comingSoon = (feature: string) =>
@@ -221,8 +221,8 @@ export default function SettingsScreen() {
 
           <button
             className="btn btn--danger"
-            onClick={() => {
-              logout();
+            onClick={async () => {
+              await logout();
               router.replace('/login');
             }}
           >

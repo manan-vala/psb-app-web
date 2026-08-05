@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 
 /**
@@ -56,10 +56,14 @@ export function PinKeypad({
   onKeypress,
   disabled,
 }: PinKeypadProps) {
-  // Lazy initializer so the shuffled layout exists on the very first render.
-  const [keypadNumbers] = useState<number[]>(() =>
-    shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
-  );
+  // Start with a stable order for SSR/hydration, then shuffle client-side after mount.
+  const [keypadNumbers, setKeypadNumbers] = useState<number[]>([
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 0,
+  ]);
+
+  useEffect(() => {
+    setKeypadNumbers(shuffleArray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
+  }, []);
 
   const handleKeyPress = (digit: number) => {
     if (disabled || pin.length >= maxLength) return;

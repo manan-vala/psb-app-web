@@ -7,7 +7,7 @@ import { PinDots, PinKeypad } from '@/components/ui/PinKeypad';
 import { StepUpModal } from '@/components/ui/StepUpModal';
 import { useAlert } from '@/context/AlertContext';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { getProfile, setSessionActive, verifyPin } from '@/services/auth';
+import { getAuthStatus, verifyPin } from '@/services/auth';
 
 const PIN_LENGTH = 4;
 
@@ -30,23 +30,29 @@ export default function LoginScreen() {
   const [stepUp, setStepUp] = useState<string | null>(null);
 
   useEffect(() => {
-    const profile = getProfile();
-    if (profile?.fullName) setFirstName(profile.fullName.trim().split(' ')[0]);
+    getAuthStatus().then((status) => {
+      if (status.profile?.fullName) {
+        setFirstName(status.profile.fullName.trim().split(' ')[0]);
+      }
+    });
   }, []);
 
   const enterApp = () => {
-    setSessionActive(true);
     router.replace('/home');
   };
 
   const handleLogin = async (currentPin: string) => {
     setLoading(true);
 
-    if (!(await verifyPin(currentPin))) {
+    const result = await verifyPin(currentPin);
+    if (!result.ok) {
       setLoading(false);
       setError(true);
       setPin('');
-      showAlert('Incorrect PIN', 'The PIN you entered is incorrect. Please try again.');
+      showAlert(
+        result.locked ? 'Too Many Attempts' : 'Incorrect PIN',
+        result.error ?? 'The PIN you entered is incorrect. Please try again.'
+      );
       return;
     }
 

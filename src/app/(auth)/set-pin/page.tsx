@@ -6,7 +6,7 @@ import { Icon } from '@/components/ui/Icon';
 import { PinDots, PinKeypad } from '@/components/ui/PinKeypad';
 import { useAlert } from '@/context/AlertContext';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { setPin as persistPin, setSessionActive } from '@/services/auth';
+import { setPin as persistPin } from '@/services/auth';
 
 const PIN_LENGTH = 4;
 
@@ -57,18 +57,20 @@ export default function SetPinScreen() {
 
     setTimeout(async () => {
       setSaving(true);
-      try {
-        await persistPin(value);
-        setSessionActive(true);
-        router.replace('/home');
-      } catch {
+      const result = await persistPin(value);
+      if (!result.ok) {
         setSaving(false);
         setTransitioning(false);
         setStage('create');
         setFirstPin('');
         setPinValue('');
-        showAlert('Something went wrong', 'Could not save your PIN. Please try again.');
+        showAlert(
+          'Something went wrong',
+          result.error ?? 'Could not save your PIN. Please try again.'
+        );
+        return;
       }
+      router.replace('/home');
     }, 300);
   };
 

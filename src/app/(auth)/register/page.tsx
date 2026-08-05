@@ -21,17 +21,23 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
+
+  const passwordRules = [
+    { label: 'At least 8 characters', met: password.length >= 8 },
+    { label: 'At least one number', met: /[0-9]/.test(password) },
+    { label: 'At least one special character', met: /[^A-Za-z0-9]/.test(password) },
+  ];
 
   const validate = (): string | null => {
     if (fullName.trim().length < 2) return 'Please enter your full name.';
-    if (!/^[6-9]\d{9}$/.test(mobile.trim())) return 'Enter a valid 10-digit mobile number.';
+    if (!/^\d{10}$/.test(mobile.trim())) return 'Enter a valid 10-digit mobile number.';
     if (email.trim().length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return 'Enter a valid email address.';
     }
     if (password.length < 8) return 'Password must be at least 8 characters.';
-    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-      return 'Password must include both letters and numbers.';
-    }
+    if (!/[0-9]/.test(password)) return 'Password must contain at least one number.';
+    if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one special character.';
     if (password !== confirmPassword) return 'Passwords do not match.';
     return null;
   };
@@ -44,23 +50,25 @@ export default function RegisterScreen() {
     }
 
     setLoading(true);
-    // Simulated provisioning delay — the account lives on-device.
+    // Small delay so the loading state is visible even on a fast connection.
     setTimeout(async () => {
-      try {
-        await registerAccount(
-          {
-            fullName: fullName.trim(),
-            mobile: mobile.trim(),
-            email: email.trim() || undefined,
-          },
-          password
+      const result = await registerAccount(
+        {
+          fullName: fullName.trim(),
+          mobile: mobile.trim(),
+          email: email.trim() || undefined,
+        },
+        password
+      );
+      setLoading(false);
+      if (!result.ok) {
+        showAlert(
+          'Something went wrong',
+          result.error ?? 'Could not create your account. Please try again.'
         );
-        setLoading(false);
-        router.replace('/set-pin');
-      } catch {
-        setLoading(false);
-        showAlert('Something went wrong', 'Could not create your account. Please try again.');
+        return;
       }
+      router.replace('/set-pin');
     }, 600);
   };
 
@@ -107,16 +115,54 @@ export default function RegisterScreen() {
             />
             <Input
               label="Password"
-              placeholder="At least 8 characters"
+              placeholder="Min 8 chars, 1 number & 1 special character"
               leadingIcon="lock-outline"
               isPassword
               value={password}
               onValueChange={setPassword}
+              onFocus={() => setPasswordFocused(true)}
+              onBlur={() => setPasswordFocused(false)}
               onPaste={pasteHandlers.onPaste}
               onFocusCapture={pasteHandlers.onFocusCapture}
               onChangeTextCapture={pasteHandlers.onChangeTextCapture}
               {...keystrokeInputProps()}
             />
+            {(passwordFocused || password.length > 0) && (
+              <div style={{
+                marginTop: -6,
+                marginBottom: 8,
+                padding: '10px 14px',
+                background: 'var(--surface-low)',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--outline-variant)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}>
+                {passwordRules.map((rule) => (
+                  <div
+                    key={rule.label}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 7,
+                      fontSize: 12,
+                      fontFamily: 'var(--font-body)',
+                      color: rule.met ? 'var(--success)' : 'var(--on-surface-variant)',
+                      transition: 'color 0.2s ease',
+                    }}
+                  >
+                    <span
+                      className="material-icons"
+                      style={{ fontSize: 14, color: rule.met ? 'var(--success)' : 'var(--outline)' }}
+                    >
+                      {rule.met ? 'check_circle' : 'radio_button_unchecked'}
+                    </span>
+                    {rule.label}
+                  </div>
+                ))}
+              </div>
+            )}
             <Input
               label="Confirm Password"
               placeholder="Re-enter your password"
