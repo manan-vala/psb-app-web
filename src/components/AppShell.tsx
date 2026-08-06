@@ -14,11 +14,20 @@ import { CaptureSidebar } from '@/app/analyze/CaptureSidebar';
  * `/analyze` is a self-contained capture-layer demo: it gets its own
  * telemetry context (isolated from the real `TelemetryProvider`/backend) and
  * swaps the phone's default caption for a live capture sidebar.
+ *
+ * `/face-id-test` is a developer diagnostics console, not a customer screen —
+ * it's deliberately outside the phone mockup because the thing being tested is
+ * the camera feed, and a 260px circle inside a phone bezel is too small to
+ * judge framing, lighting, or whether the liveness challenge actually
+ * registered. It also lives outside the `(app)` route group, so it gets no
+ * drawer or bottom nav.
  */
+const FULL_VIEWPORT_ROUTES = new Set(['/', '/face-id-test']);
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
 
-  if (pathname === '/') {
+  if (FULL_VIEWPORT_ROUTES.has(pathname)) {
     return <AlertProvider>{children}</AlertProvider>;
   }
 

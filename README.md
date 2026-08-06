@@ -139,11 +139,12 @@ locally or deploy to Vercel.
 
 ```sql
 CREATE TABLE users (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  full_name     text NOT NULL,
-  mobile        varchar(15) NOT NULL UNIQUE,
-  email         text UNIQUE,
-  password_hash text NOT NULL,
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  full_name      text NOT NULL,
+  mobile         varchar(15) NOT NULL UNIQUE,
+  account_number varchar(14) NOT NULL UNIQUE CHECK (account_number ~ '^[0-9]{14}$'),
+  email          text UNIQUE,
+  password_hash  text NOT NULL,
   pin_hash      text,
   pin_attempts  integer NOT NULL DEFAULT 0,
   pin_locked_until timestamptz,

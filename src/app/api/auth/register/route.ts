@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 interface RegisterBody {
   fullName?: string;
   mobile?: string;
-  email?: string;
+  accountNumber?: string;
   password?: string;
 }
 
@@ -23,8 +23,8 @@ function validate(body: RegisterBody): string | null {
   if (!body.mobile || !/^\d{10}$/.test(body.mobile.trim())) {
     return 'Enter a valid 10-digit mobile number.';
   }
-  if (body.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim())) {
-    return 'Enter a valid email address.';
+  if (!body.accountNumber || !/^\d{14}$/.test(body.accountNumber.trim())) {
+    return 'Enter a valid 14-digit account number.';
   }
   if (!body.password || body.password.length < 8) {
     return 'Password must be at least 8 characters.';
@@ -44,13 +44,13 @@ export async function POST(req: Request) {
 
   const fullName = body.fullName!.trim();
   const mobile = body.mobile!.trim();
-  const email = body.email?.trim() || null;
+  const accountNumber = body.accountNumber!.trim();
   const passwordHash = await hashSecret(body.password!);
 
   try {
     const [user] = await sql`
-      INSERT INTO users (full_name, mobile, email, password_hash)
-      VALUES (${fullName}, ${mobile}, ${email}, ${passwordHash})
+      INSERT INTO users (full_name, mobile, account_number, password_hash)
+      VALUES (${fullName}, ${mobile}, ${accountNumber}, ${passwordHash})
       RETURNING id
     `;
 
@@ -66,9 +66,9 @@ export async function POST(req: Request) {
         { status: 409 }
       );
     }
-    if (message.includes('users_email_key')) {
+    if (message.includes('users_account_number_key')) {
       return NextResponse.json(
-        { error: 'An account with this email already exists.' },
+        { error: 'An account with this account number already exists.' },
         { status: 409 }
       );
     }

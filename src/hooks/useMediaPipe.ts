@@ -22,7 +22,15 @@ export const DETECTION_CONFIDENCE = 0.85;
 export const MIN_FACE_AREA_RATIO = 0.1;
 export const MAX_FACE_AREA_RATIO = 0.65;
 export const STABLE_FRAME_COUNT = 3;
-export const CROP_PADDING = 0.25;
+// Margin added around the detected face box before cropping.
+//
+// Raised from 0.25: the server runs SCRFD on whatever we send, and a face that
+// fills the frame edge-to-edge scores *lower* than one with surrounding
+// context, because the detector was trained on faces occupying part of a
+// scene. Padding the crop is the cheapest way to lift det_score, and it costs
+// nothing downstream — ArcFace re-aligns from its own 5-point landmarks, so
+// the embedding is normalized regardless of how much margin we include.
+export const CROP_PADDING = 0.4;
 export const CROP_OUTPUT_SIZE = 480;
 
 export interface FaceBox {
@@ -53,7 +61,22 @@ interface UseMediaPipeReturn {
   ready: boolean;
   error: string | null;
   guideState: GuideState;
-  lastReading: FaceReading | null;
+  /**
+   * Registers a callback invoked synchronously with EVERY detection, straight
+   * from the rAF loop. Pass null to unsubscribe.
+   *
+   * This exists because the previous design published readings via React state
+   * and let consumers observe them in an effect. Detections are produced once
+   * per animation frame, but a state update only surfaces after React commits
+   * — so whenever inference plus render exceeded one frame interval, readings
+   * were overwritten before anyone saw them.
+   *
+   * That silently broke blink detection. A blink lasts ~100-150ms (3-5 frames
+   * at 30fps), so dropping half the frames could mean zero eyes-closed samples
+   * ever reached the liveness check. Head turns masked the bug because a
+   * turned head is sustained across dozens of frames.
+   */
+  subscribeToFrames: (fn: ((reading: FaceReading) => void) | null) => void;
   startCamera: (video: HTMLVideoElement) => Promise<void>;
   stopCamera: () => void;
   /** Crops the current video frame to the last-known face box, padded, and returns a base64 JPEG (no data: prefix). */
@@ -69,7 +92,14 @@ export function useMediaPipe(): UseMediaPipeReturn {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [guideState, setGuideState] = useState<GuideState>('loading-mediapipe');
-  const [lastReading, setLastReading] = useState<FaceReading | null>(null);
+  /**
+   * Held in a ref, not state. Nothing renders the raw reading, so publishing
+   * it through state cost a re-render every animation frame and — worse — made
+   * consumers see a lossy, render-rate-limited sample of the detections rather
+   * than all of them.
+   */
+  const lastReadingRef = useRef<FaceReading | null>(null);
+  const frameSubscriberRef = useRef<((reading: FaceReading) => void) | null>(null);
 
   const landmarkerRef = useRef<import('@mediapipe/tasks-vision').FaceLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -168,7 +198,12 @@ export function useMediaPipe(): UseMediaPipeReturn {
 
         const result = landmarker.detectForVideo(video, performance.now());
         const reading = readingFromResult(result, video.videoWidth, video.videoHeight);
-        setLastReading(reading);
+
+        // Synchronous, in the loop — no React scheduling between producing a
+        // detection and delivering it, so the liveness sampler sees every
+        // frame including the handful where the eyes are actually shut.
+        lastReadingRef.current = reading;
+        frameSubscriberRef.current?.(reading);
 
         if (reading.detected) {
           const areaOk =
@@ -197,8 +232,18 @@ export function useMediaPipe(): UseMediaPipeReturn {
     []
   );
 
+  const subscribeToFrames = useCallback(
+    (fn: ((reading: FaceReading) => void) | null) => {
+      frameSubscriberRef.current = fn;
+    },
+    []
+  );
+
   const captureCropBase64 = useCallback((video: HTMLVideoElement): string | null => {
-    const reading = lastReading;
+    // Reads the ref, so the crop uses the most recent detection rather than
+    // whatever React last committed — the box could otherwise be a frame or
+    // more stale, which matters when the head is mid-turn.
+    const reading = lastReadingRef.current;
     if (!reading?.box) return null;
 
     const vw = video.videoWidth;
@@ -224,11 +269,11 @@ export function useMediaPipe(): UseMediaPipeReturn {
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
     return dataUrl.split(',')[1] ?? null;
-  }, [lastReading]);
+  }, []);
 
   return useMemo(
-    () => ({ ready, error, guideState, lastReading, startCamera, stopCamera, captureCropBase64 }),
-    [ready, error, guideState, lastReading, startCamera, stopCamera, captureCropBase64]
+    () => ({ ready, error, guideState, subscribeToFrames, startCamera, stopCamera, captureCropBase64 }),
+    [ready, error, guideState, subscribeToFrames, startCamera, stopCamera, captureCropBase64]
   );
 }
 

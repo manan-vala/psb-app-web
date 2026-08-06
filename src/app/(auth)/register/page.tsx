@@ -17,7 +17,7 @@ export default function RegisterScreen() {
 
   const [fullName, setFullName] = useState('');
   const [mobile, setMobile] = useState('');
-  const [email, setEmail] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,9 +32,7 @@ export default function RegisterScreen() {
   const validate = (): string | null => {
     if (fullName.trim().length < 2) return 'Please enter your full name.';
     if (!/^\d{10}$/.test(mobile.trim())) return 'Enter a valid 10-digit mobile number.';
-    if (email.trim().length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      return 'Enter a valid email address.';
-    }
+    if (!/^\d{14}$/.test(accountNumber.trim())) return 'Enter a valid 14-digit account number.';
     if (password.length < 8) return 'Password must be at least 8 characters.';
     if (!/[0-9]/.test(password)) return 'Password must contain at least one number.';
     if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one special character.';
@@ -56,7 +54,7 @@ export default function RegisterScreen() {
         {
           fullName: fullName.trim(),
           mobile: mobile.trim(),
-          email: email.trim() || undefined,
+          accountNumber: accountNumber.trim(),
         },
         password
       );
@@ -106,12 +104,13 @@ export default function RegisterScreen() {
               onValueChange={(v) => setMobile(v.replace(/[^0-9]/g, '').slice(0, 10))}
             />
             <Input
-              label="Email (optional)"
-              placeholder="you@example.com"
-              leadingIcon="mail-outline"
-              value={email}
-              inputMode="email"
-              onValueChange={setEmail}
+              label="Account Number"
+              placeholder="14-digit account number"
+              leadingIcon="account-balance"
+              value={accountNumber}
+              inputMode="numeric"
+              maxLength={14}
+              onValueChange={(v) => setAccountNumber(v.replace(/[^0-9]/g, '').slice(0, 14))}
             />
             <Input
               label="Password"

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Icon } from './Icon';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Button } from './Button';
 import { useMediaPipe, STABLE_FRAME_COUNT } from '@/hooks/useMediaPipe';
 import { useLivenessChallenge, type Challenge, type LivenessFrame } from '@/hooks/useLivenessChallenge';
 
@@ -16,6 +16,30 @@ interface FaceCameraProps {
   onCapture: (payload: FaceCapturePayload) => void;
   onError: (msg: string) => void;
   disabled?: boolean;
+  /**
+   * 'auto' (default) fires the challenge the instant the face goes stable —
+   * the original behaviour, kept for verification and the single-shot enroll
+   * path so nothing existing changes.
+   *
+   * 'manual' waits for the user to press Capture. The button only enables
+   * once the face is already stable, so the frame that gets cropped and sent
+   * is one the detector has already vouched for — this is what removes the
+   * half-turned / motion-blurred captures that auto mode can occasionally
+   * grab on the very first stable frame.
+   */
+  captureMode?: 'auto' | 'manual';
+  /** Pins the liveness challenge instead of choosing randomly. See useLivenessChallenge.begin. */
+  forcedChallenge?: Challenge;
+  /** Label for the manual capture button. Ignored in auto mode. */
+  captureLabel?: string;
+  /**
+   * Change this value to clear a completed capture and arm the camera for
+   * another one, *without* remounting — a remount would tear down the
+   * MediaPipe landmarker and the getUserMedia stream and pay the multi-second
+   * init cost again, which is exactly what multi-pose enrollment must avoid
+   * between poses.
+   */
+  resetToken?: number;
 }
 
 type VisualState =
@@ -43,7 +67,16 @@ const OVAL_COLOR: Record<VisualState, string> = {
  * Must only be rendered client-side — imported via `next/dynamic` with
  * `ssr: false` wherever it's used, since MediaPipe touches WebAssembly.
  */
-export function FaceCamera({ mode, onCapture, onError, disabled }: FaceCameraProps) {
+export function FaceCamera({
+  mode,
+  onCapture,
+  onError,
+  disabled,
+  captureMode = 'auto',
+  forcedChallenge,
+  captureLabel = 'Capture',
+  resetToken = 0,
+}: FaceCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediapipe = useMediaPipe();
   const liveness = useLivenessChallenge();
@@ -62,26 +95,52 @@ export function FaceCamera({ mode, onCapture, onError, disabled }: FaceCameraPro
     if (mediapipe.error) onError(mediapipe.error);
   }, [mediapipe.error, onError]);
 
-  // Once the face has been stable for STABLE_FRAME_COUNT frames, kick off
-  // the liveness challenge exactly once per attempt.
+  // Re-arm for the next capture when the parent bumps resetToken. Skipped on
+  // the initial render (resetToken starts at its initial value) so this
+  // doesn't fight the mount-time state.
+  const lastResetRef = useRef(resetToken);
   useEffect(() => {
-    if (mediapipe.guideState === 'stable' && !challengeStartedRef.current && !captured) {
-      challengeStartedRef.current = true;
-      liveness.begin();
+    if (lastResetRef.current === resetToken) return;
+    lastResetRef.current = resetToken;
+    setCaptured(false);
+    challengeStartedRef.current = false;
+    submittedRef.current = false;
+    liveness.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetToken]);
+
+  const beginChallenge = useCallback(() => {
+    if (challengeStartedRef.current || captured) return;
+    challengeStartedRef.current = true;
+    liveness.begin(forcedChallenge);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [captured, forcedChallenge, liveness.begin]);
+
+  // Auto mode only: once the face has been stable for STABLE_FRAME_COUNT
+  // frames, kick off the liveness challenge exactly once per attempt. In
+  // manual mode this is driven by the Capture button instead.
+  useEffect(() => {
+    if (captureMode === 'auto' && mediapipe.guideState === 'stable' && !challengeStartedRef.current && !captured) {
+      beginChallenge();
     }
     if (mediapipe.guideState !== 'stable' && liveness.status === 'idle') {
       challengeStartedRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediapipe.guideState, captured]);
+  }, [mediapipe.guideState, captured, captureMode]);
 
   // Feed every reading to the liveness sampler while a challenge is running.
+  //
+  // Subscribing to the rAF loop rather than watching a piece of state: state
+  // only surfaces what React has committed, which silently dropped frames
+  // whenever inference outpaced rendering. See subscribeToFrames in
+  // useMediaPipe for why that broke blink detection specifically.
   useEffect(() => {
-    if (liveness.status === 'in-progress' && mediapipe.lastReading) {
-      liveness.sample(mediapipe.lastReading);
-    }
+    if (liveness.status !== 'in-progress') return;
+    mediapipe.subscribeToFrames(liveness.sample);
+    return () => mediapipe.subscribeToFrames(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediapipe.lastReading, liveness.status]);
+  }, [liveness.status, liveness.sample]);
 
   // Challenge window closed (passed or failed, client-side pre-check) —
   // capture and submit regardless, since the server re-validates the same
@@ -119,7 +178,17 @@ export function FaceCamera({ mode, onCapture, onError, disabled }: FaceCameraPro
     ? 'loading-mediapipe'
     : 'searching';
 
-  const instruction = instructionFor(visualState, mediapipe.error, liveness.instructionText, captured);
+  const isManual = captureMode === 'manual';
+  const canCapture = isManual && !captured && !disabled && liveness.status !== 'in-progress' && mediapipe.guideState === 'stable';
+
+  const instruction = instructionFor(
+    visualState,
+    mediapipe.error,
+    liveness.instructionText,
+    captured,
+    isManual && canCapture,
+    captureLabel
+  );
 
   return (
     <div className="face-camera">
@@ -146,6 +215,16 @@ export function FaceCamera({ mode, onCapture, onError, disabled }: FaceCameraPro
         </svg>
       </div>
       <p className="face-camera__instruction">{instruction}</p>
+
+      {isManual && !captured && (
+        <Button
+          label={captureLabel}
+          icon="photo-camera"
+          onClick={beginChallenge}
+          disabled={!canCapture}
+          style={{ marginTop: 4 }}
+        />
+      )}
     </div>
   );
 }
@@ -154,7 +233,10 @@ function instructionFor(
   state: VisualState,
   error: string | null,
   challengeText: string,
-  captured: boolean
+  captured: boolean,
+  /** True only when manual mode is armed *and* the face is already stable. */
+  awaitingCapturePress: boolean,
+  captureLabel: string
 ): string {
   if (error) return error;
   if (captured) return 'Analyzing…';
@@ -164,7 +246,10 @@ function instructionFor(
     case 'searching':
       return 'Position your face in the oval';
     case 'found':
-      return 'Hold still…';
+      // In manual mode a stable face is the *precondition* for capturing, not
+      // the trigger — so once stable, say what the user is now expected to do
+      // instead of "hold still", which implies something happens on its own.
+      return awaitingCapturePress ? `Looking good — press ${captureLabel}` : 'Hold still…';
     case 'challenge':
       return challengeText;
     default:

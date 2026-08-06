@@ -2249,20 +2249,704 @@ ul {
   min-height: 22px;
 }
 
-.test-console__phase {
-  background: var(--surface-lowest);
-  border: 1px solid var(--surface-dim);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  margin-bottom: 12px;
-  box-shadow: var(--shadow-low);
+/* Multi-pose enrollment stepper */
+.pose-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
 }
 
-.test-console__raw {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 12px;
-  border-radius: var(--radius);
+.pose-steps__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--on-surface-variant);
+  opacity: 0.5;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.pose-steps__item--active {
+  opacity: 1;
+  color: var(--on-surface);
+  font-weight: 600;
+}
+
+.pose-steps__item--done {
+  opacity: 1;
+  color: var(--success);
+}
+
+.pose-steps__dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.pose-steps__item--done .pose-steps__dot {
+  background: var(--success);
+  border-color: var(--success);
+  color: var(--surface-lowest);
+}
+
+/* ==========================================================================
+   Face ID diagnostics console (/face-id-test)
+
+   A developer tool, not a customer screen — it renders full-viewport outside
+   the phone mockup (see AppShell) because the subject under test is the
+   camera feed itself, and a 260px circle in a phone bezel is too small to
+   judge framing, lighting, or whether a liveness challenge registered.
+
+   Visually it borrows the landing page's system (same ink/muted/line ramp,
+   grid overlay, orange + blue glows, translucent white cards) so that leaving
+   the phone frame doesn't mean leaving the product — this reads as the same
+   application, just on a wider canvas.
+   ========================================================================== */
+
+.fid {
+  --fid-ink: #152238;
+  --fid-muted: #5e6c82;
+  --fid-line: rgba(72, 94, 138, 0.14);
+  --fid-card: rgba(255, 255, 255, 0.72);
+  --fid-card-solid: rgba(255, 255, 255, 0.92);
+
+  position: relative;
+  min-height: 100dvh;
+  color: var(--fid-ink);
+  font-family: var(--font-body);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(245, 248, 252, 0.96)),
+    var(--surface);
+  isolation: isolate;
+
+  /* `clip`, NOT `hidden`.
+   *
+   * The decorative glows are absolutely positioned with negative offsets
+   * (right: -180px), so they overhang the right edge and would otherwise add
+   * a horizontal scrollbar — hence the need to clip at all.
+   *
+   * But `overflow-x: hidden` forces the *other* axis to compute from
+   * `visible` to `auto`, which turns this element into a scroll container.
+   * That produced two scrollbars: one on `.fid` for its own content, and one
+   * on the viewport, because the reset sets html/body to height 100%, pinning
+   * the body to exactly the viewport height while this element is 100dvh tall.
+   *
+   * `overflow-x: clip` clips without creating a scroll container, so
+   * `overflow-y` stays `visible`. That leaves a single document scrollbar and
+   * also keeps the sticky header and sticky stage anchored to the viewport
+   * rather than to an inner scrollport.
+   */
+  overflow-x: clip;
+}
+
+/* Same ambient treatment as the landing page. */
+.fid__grid-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  opacity: 0.45;
+  background-image:
+    linear-gradient(rgba(72, 94, 138, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(72, 94, 138, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.fid__glow {
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(2px);
+}
+
+.fid__glow--orange {
+  top: -280px;
+  right: -180px;
+  width: 640px;
+  height: 640px;
+  background: radial-gradient(circle, rgba(255, 133, 51, 0.22), rgba(255, 133, 51, 0) 68%);
+}
+
+.fid__glow--blue {
+  bottom: -360px;
+  left: -200px;
+  width: 720px;
+  height: 720px;
+  background: radial-gradient(circle, rgba(181, 204, 254, 0.28), rgba(181, 204, 254, 0) 68%);
+}
+
+/* Buttons are width:100% app-wide; in the console they sit inline. */
+.fid .btn {
+  width: auto;
+  height: 42px;
+  font-size: 15px;
+}
+
+.fid .btn--ghost {
+  color: var(--fid-muted);
+}
+
+.fid .btn--ghost:hover {
+  color: var(--fid-ink);
+}
+
+/* --- Header -------------------------------------------------------------- */
+
+.fid__header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 13px clamp(18px, 4vw, 40px);
+  background: rgba(251, 249, 248, 0.78);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--fid-line);
+}
+
+.fid__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fid__brand-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 28px rgba(255, 102, 0, 0.14);
+}
+
+.fid__title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin: 0;
+}
+
+.fid__subtitle {
+  font-size: 13px;
+  color: var(--fid-muted);
+  margin: 2px 0 0;
+}
+
+.fid__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 13px;
+  border: 1px solid var(--fid-line);
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fid-muted);
+}
+
+.fid__chip strong {
+  color: var(--fid-ink);
+  font-weight: 700;
+}
+
+/* Identifies the account the enroll/verify phases are writing to. */
+.fid__chip--session {
+  color: var(--fid-ink);
+  border-color: rgba(72, 94, 138, 0.22);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.fid__chip--session em {
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 102, 0, 0.12);
+  color: var(--primary);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fid__chip--warn {
+  color: var(--on-error-container);
+  border-color: rgba(186, 26, 26, 0.25);
+  background: var(--error-container);
+}
+
+/* Marks the phase that currently owns the camera stage. */
+.fid__chip--live {
+  color: var(--primary);
+  border-color: rgba(255, 102, 0, 0.28);
+  background: rgba(255, 102, 0, 0.08);
+}
+
+.fid__chip--live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: fid-pulse 1.3s ease-in-out infinite;
+}
+
+.fid__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+  width: min(1400px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: 20px 0 36px;
+}
+
+@media (max-width: 1100px) {
+  .fid__grid {
+    grid-template-columns: minmax(0, 1fr);
+    width: calc(100% - 36px);
+    padding: 20px 0 56px;
+  }
+}
+
+/* --- Left: camera stage --------------------------------------------------- */
+
+.fid__stage {
+  position: sticky;
+  top: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  /* Viewport-relative, not a fixed 560px: on a short laptop screen (~695px)
+     a hard 560 left the stage taller than its own content and taller than the
+     phase column beside it, so most of the card — and the grid row it sized —
+     was empty. The clamp keeps it generous on tall displays and lets it
+     collapse toward its content on short ones. */
+  min-height: clamp(320px, 56vh, 520px);
+  padding: 26px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 24px;
+  background: var(--fid-card);
+  box-shadow: 0 18px 44px rgba(34, 56, 93, 0.1);
+  backdrop-filter: blur(14px);
+}
+
+@media (max-width: 1100px) {
+  .fid__stage {
+    position: static;
+    min-height: 0;
+  }
+}
+
+.fid__stage-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 102, 0, 0.1);
+  color: var(--primary);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.fid__stage-title {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  text-align: center;
+  margin: 0;
+}
+
+.fid__stage-hint {
+  max-width: 46ch;
+  text-align: center;
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: var(--fid-muted);
+  margin: 0;
+}
+
+/* The whole point of leaving the phone frame: a camera you can actually see.
+   The 46vh term keeps it from overflowing a short viewport — at 695px tall
+   that still yields ~320px, well above the 260px it had inside the phone. */
+.fid .face-camera__frame {
+  width: min(420px, 62vw, 46vh);
+  height: min(420px, 62vw, 46vh);
+  box-shadow: 0 20px 48px rgba(34, 56, 93, 0.18);
+}
+
+.fid .face-camera__instruction {
+  color: var(--fid-ink);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  min-height: 26px;
+}
+
+.fid .pose-steps__item {
+  color: var(--fid-muted);
+}
+
+.fid .pose-steps__item--active {
+  color: var(--fid-ink);
+}
+
+.fid__stage-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--fid-muted);
+  text-align: center;
+}
+
+.fid__stage-empty-ring {
+  display: grid;
+  place-items: center;
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 2px dashed rgba(72, 94, 138, 0.22);
+  color: var(--primary);
+  background: rgba(255, 255, 255, 0.6);
+  animation: fid-breathe 3.6s ease-in-out infinite;
+}
+
+@keyframes fid-breathe {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.04); }
+}
+
+/* --- Right: phase list ---------------------------------------------------- */
+
+.fid__phases {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fid-phase {
+  /* Width of the index + dot columns and their gaps. The result body indents
+     by exactly this much so it lines up under the phase title. */
+  --fid-gutter: 58px;
+
+  padding: 18px 20px;
+  border: 1px solid var(--fid-line);
+  border-left: 3px solid var(--fid-line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.54);
+  transition: border-color 0.22s ease, background-color 0.22s ease, box-shadow 0.22s ease;
+}
+
+.fid-phase--active {
+  background: var(--fid-card-solid);
+  border-left-color: var(--primary);
+  box-shadow: 0 14px 32px rgba(34, 56, 93, 0.1);
+}
+
+.fid-phase--pass { border-left-color: var(--success); }
+.fid-phase--fail { border-left-color: var(--error); }
+
+.fid-phase__head {
+  display: grid;
+  grid-template-columns: 20px 11px minmax(0, 1fr) auto;
+  /* Start-aligned, not centred: the text block is two lines, so centring
+     would float the dot and index against the gap between them instead of
+     sitting on the title. */
+  align-items: start;
+  column-gap: 13px;
+}
+
+.fid-phase__index {
+  margin-top: 5px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-align: right;
+  color: var(--fid-muted);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.fid-phase__head .fid-dot {
+  /* Optically centred on the title's first line, not on the whole block. */
+  margin-top: 6px;
+}
+
+.fid-phase__text {
+  min-width: 0;
+}
+
+.fid-phase__action {
+  align-self: center;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fid-phase__title {
+  font-family: var(--font-display);
+  font-size: 16.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+  margin: 0;
+}
+
+.fid-phase__expect {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fid-muted);
+  margin: 5px 0 0;
+}
+
+.fid-phase__body {
+  margin-top: 16px;
+  padding-top: 15px;
+  /* Indent to the title column; the border still spans the full card. */
+  padding-left: var(--fid-gutter);
+  border-top: 1px solid var(--fid-line);
+  animation: fid-fade-in 0.28s ease both;
+}
+
+@media (max-width: 620px) {
+  .fid-phase__body {
+    padding-left: 0;
+  }
+}
+
+@keyframes fid-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.fid-dot {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(72, 94, 138, 0.22);
+  transition: background-color 0.2s ease;
+}
+
+.fid-dot--running {
+  background: var(--primary);
+  animation: fid-pulse 1.3s ease-in-out infinite;
+}
+
+.fid-dot--pass { background: var(--success); }
+.fid-dot--fail { background: var(--error); }
+
+@keyframes fid-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 102, 0, 0.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 102, 0, 0); }
+}
+
+/* --- Results -------------------------------------------------------------- */
+
+.fid-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  font-size: 14px;
+}
+
+.fid-stat + .fid-stat {
+  border-top: 1px solid var(--fid-line);
+}
+
+.fid-stat__k { color: var(--fid-muted); }
+
+.fid-stat__v {
+  font-weight: 600;
+  text-align: right;
+}
+
+/* The headline number for a verify phase — big enough to read across a room
+   during a demo, which is the whole reason this page exists. */
+.fid-score {
+  font-family: var(--font-display);
+  font-size: clamp(38px, 5vw, 50px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.fid-score--pass { color: var(--success); }
+.fid-score--fail { color: var(--error); }
+
+/* Score on the left, plain-language identity verdict on the right. */
+.fid-result {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 460px) {
+  .fid-result {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+}
+
+/* The answer to "was this the same human" — the thing a tester is actually
+   reading for, so it gets real weight rather than living in a stat row. */
+.fid-identity {
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+/* Coloured by IDENTITY, not by pass/fail. "Different person" is the desired
+   outcome in phase 5, so it must not be painted as an error — the phase's
+   status dot and left border already carry pass/fail. */
+.fid-identity--same {
+  color: var(--success);
+}
+
+.fid-identity--different {
+  color: var(--secondary);
+}
+
+.fid-identity__note {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--fid-muted);
+  margin: 3px 0 0;
+}
+
+.fid-meter {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(72, 94, 138, 0.1);
+  overflow: hidden;
+}
+
+.fid-meter__fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.fid-meter__mark {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 18px;
+  border-radius: 1px;
+  background: var(--fid-ink);
+  opacity: 0.55;
+}
+
+.fid-meter__scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--fid-muted);
+}
+
+.fid-note {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--fid-muted);
+  margin: 12px 0 0;
+}
+
+.fid-note--error {
+  padding: 10px 13px;
+  border-radius: var(--radius-md);
+  background: var(--error-container);
+  color: var(--on-error-container);
+}
+
+.fid-raw {
+  margin: 10px 0 0;
+  padding: 13px 15px;
+  border: 1px solid var(--fid-line);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--fid-ink);
   overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.fid-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fid-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.fid-link:hover { color: var(--primary); }
+
+.fid-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(1400px, calc(100% - 64px));
+  margin: 24px auto 0;
+  padding: 15px 19px;
+  border: 1px solid rgba(186, 26, 26, 0.2);
+  border-radius: 18px;
+  background: var(--error-container);
+  color: var(--on-error-container);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+@media (max-width: 1100px) {
+  .fid-banner { width: calc(100% - 36px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fid *,
+  .fid *::before,
+  .fid *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

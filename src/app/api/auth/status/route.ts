@@ -31,7 +31,12 @@ export async function GET() {
     hasPin,
     isAuthenticated: !!sessionUser,
     profile: sessionUser
-      ? { fullName: sessionUser.fullName, mobile: sessionUser.mobile, email: sessionUser.email }
+      ? {
+          fullName: sessionUser.fullName,
+          mobile: sessionUser.mobile,
+          accountNumber: sessionUser.accountNumber,
+          email: sessionUser.email,
+        }
       : null,
   });
 }

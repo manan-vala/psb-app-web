@@ -32,7 +32,26 @@ const CHALLENGE_WINDOW_MS = 2500;
 const BLINK_EAR_THRESHOLD = 0.4; // below this, eyes are considered closed
 const TURN_YAW_THRESHOLD_DEG = 15;
 
-const CHALLENGES: Challenge[] = ['blink', 'turn_left', 'turn_right'];
+/**
+ * Pool used when a challenge is chosen at random — i.e. at VERIFICATION time.
+ *
+ * `blink` is deliberately excluded. It is not weaker security: per the spec's
+ * threat table (§9) blink and head-turn cover exactly the same attacks —
+ * both defeat a printed photo or a paused frame, neither defeats a video
+ * replay that performs the requested action. But a blink is a ~100-150ms
+ * transient, where a held turn spans dozens of frames, so blink produced
+ * almost all of the false rejections while adding no coverage.
+ *
+ * Verification is the moment that must not fail spuriously: it gates a
+ * transaction and the user gets one shot before falling back to a password.
+ * Enrollment is guided and retryable, so it still uses blink for its frontal
+ * pose (see MultiPoseEnroll) — that's the one place a challenge has to leave
+ * the head facing the camera.
+ *
+ * `blink` remains in the `Challenge` type and is still accepted and validated
+ * server-side, so enrollment keeps working and no API contract changes.
+ */
+const RANDOM_CHALLENGES: Challenge[] = ['turn_left', 'turn_right'];
 
 const INSTRUCTIONS: Record<Challenge, string> = {
   blink: 'Blink now',
@@ -46,8 +65,17 @@ interface UseLivenessChallengeReturn {
   challenge: Challenge;
   status: LivenessStatus;
   instructionText: string;
-  /** Starts a fresh challenge window (call once a stable face is detected). */
-  begin: () => void;
+  /**
+   * Starts a fresh challenge window (call once a stable face is detected).
+   *
+   * Pass `forced` to pin the challenge instead of picking randomly — used by
+   * multi-pose enrollment, which needs a *known* sequence (blink, then left,
+   * then right) so each capture contributes a different head angle to the
+   * averaged template. Verification deliberately keeps the random default:
+   * an unpredictable challenge is what makes a pre-recorded clip harder to
+   * stage, and that property matters at verify time, not at enroll time.
+   */
+  begin: (forced?: Challenge) => void;
   /** Call every animation frame with the latest reading while a challenge is in progress. */
   sample: (reading: FaceReading) => void;
   reset: () => void;
@@ -55,7 +83,7 @@ interface UseLivenessChallengeReturn {
 }
 
 function pickChallenge(): Challenge {
-  return CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
+  return RANDOM_CHALLENGES[Math.floor(Math.random() * RANDOM_CHALLENGES.length)];
 }
 
 export function useLivenessChallenge(): UseLivenessChallengeReturn {
@@ -66,8 +94,8 @@ export function useLivenessChallenge(): UseLivenessChallengeReturn {
   const startedAtRef = useRef<number | null>(null);
   const baselineYawRef = useRef<number | null>(null);
 
-  const begin = useCallback(() => {
-    setChallenge(pickChallenge());
+  const begin = useCallback((forced?: Challenge) => {
+    setChallenge(forced ?? pickChallenge());
     setStatus('in-progress');
     sequenceRef.current = [];
     startedAtRef.current = performance.now();

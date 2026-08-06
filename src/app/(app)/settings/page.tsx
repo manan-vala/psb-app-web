@@ -61,6 +61,9 @@ export default function SettingsScreen() {
                 {profile?.fullName ?? 'Bob World Customer'}
               </div>
               <div className="t-body-sm c-variant">{profile?.mobile ?? '—'}</div>
+              {profile?.accountNumber && (
+                <div className="t-body-sm c-variant">A/C {profile.accountNumber}</div>
+              )}
               {profile?.email && <div className="t-body-sm c-variant">{profile.email}</div>}
             </div>
           </div>

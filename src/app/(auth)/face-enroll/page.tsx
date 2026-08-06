@@ -10,10 +10,13 @@ import { enrollFace, pingFaceWarmup, type FaceApiResult } from '@/services/auth'
 import type { FaceCapturePayload } from '@/components/ui/FaceCamera';
 
 // MediaPipe touches WebAssembly — must never be rendered during SSR.
-const FaceCamera = dynamic(() => import('@/components/ui/FaceCamera').then((m) => m.FaceCamera), {
-  ssr: false,
-  loading: () => <div className="face-camera__frame" style={{ opacity: 0.4 }} />,
-});
+const MultiPoseEnroll = dynamic(
+  () => import('@/components/ui/MultiPoseEnroll').then((m) => m.MultiPoseEnroll),
+  {
+    ssr: false,
+    loading: () => <div className="face-camera__frame" style={{ opacity: 0.4 }} />,
+  }
+);
 
 type Stage = 'consent' | 'camera' | 'success';
 
@@ -48,12 +51,12 @@ export default function FaceEnrollScreen() {
     else router.replace('/set-pin');
   };
 
-  const handleCapture = async (payload: FaceCapturePayload) => {
+  const handleCapture = async (captures: FaceCapturePayload[]) => {
     if (submitting) return;
     setSubmitting(true);
     setCameraError(null);
 
-    const result: FaceApiResult = await enrollFace(payload);
+    const result: FaceApiResult = await enrollFace(captures);
     setSubmitting(false);
 
     if (!result.ok) {
@@ -93,7 +96,7 @@ export default function FaceEnrollScreen() {
                 />
                 <ConsentPoint
                   icon="visibility"
-                  text="You'll be asked to blink or turn your head during setup, to confirm it's really you on camera."
+                  text="You'll take three photos — facing forward, turned left, turned right — blinking or turning when prompted, to confirm it's really you on camera."
                 />
                 <ConsentPoint
                   icon="delete-outline"
@@ -116,11 +119,11 @@ export default function FaceEnrollScreen() {
               <div className="text-center mb-lg">
                 <h1 className="t-headline-sm">Position your face</h1>
                 <p className="t-body-sm c-variant" style={{ marginTop: 6 }}>
-                  Keep your face inside the oval and follow the prompt
+                  We&apos;ll take three quick photos from different angles
                 </p>
               </div>
 
-              <FaceCamera mode="enroll" onCapture={handleCapture} onError={setCameraError} disabled={submitting} />
+              <MultiPoseEnroll onComplete={handleCapture} onError={setCameraError} disabled={submitting} />
 
               {cameraError && (
                 <div className="mt-md w-full" style={{ display: 'grid', gap: 8 }}>

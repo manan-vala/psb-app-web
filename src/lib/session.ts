@@ -8,6 +8,7 @@ export interface SessionUser {
   id: string;
   fullName: string;
   mobile: string;
+  accountNumber: string;
   email: string | null;
 }
 
@@ -52,7 +53,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   if (!token) return null;
 
   const rows = await sql`
-    SELECT u.id, u.full_name, u.mobile, u.email, s.expires_at
+    SELECT u.id, u.full_name, u.mobile, u.account_number, u.email, s.expires_at
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.id = ${token}
@@ -70,6 +71,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     id: row.id as string,
     fullName: row.full_name as string,
     mobile: row.mobile as string,
+    accountNumber: row.account_number as string,
     email: (row.email as string | null) ?? null,
   };
 }

@@ -13,6 +13,7 @@
 export interface UserProfile {
   fullName: string;
   mobile: string;
+  accountNumber: string;
   email?: string | null;
 }
 
@@ -134,13 +135,24 @@ export interface FaceVerifyResult {
   error?: string;
 }
 
-/** Enrolls a face for the signed-in session. Requires an active session. */
-export async function enrollFace(payload: FaceCapturePayload): Promise<FaceApiResult> {
+/**
+ * Enrolls a face for the signed-in session. Requires an active session.
+ *
+ * Accepts either a single capture (the original single-shot path) or an array
+ * of captures from multi-pose enrollment — in the array case the server
+ * embeds each one and stores their averaged centroid as a single template.
+ * Both shapes are sent as `{ captures: [...] }`; the single-capture overload
+ * just wraps it, so there's one wire format rather than two.
+ */
+export async function enrollFace(
+  payload: FaceCapturePayload | FaceCapturePayload[]
+): Promise<FaceApiResult> {
+  const captures = Array.isArray(payload) ? payload : [payload];
   try {
     const res = await fetch('/api/face/enroll', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ captures }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: data.error ?? 'Could not set up Face ID.' };
