@@ -103,3 +103,94 @@ export async function setPin(pin: string): Promise<AuthResult> {
 export async function logout(): Promise<void> {
   await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
 }
+
+/**
+ * Face ID — talks to `/api/face/*`, which proxy (session-gated) to the
+ * separate `psb-face-api` Python service. See `src/lib/faceApi.ts` for the
+ * server-side half of this and `hybrid_face_auth_spec_v2.md` for the design.
+ */
+
+export interface FaceApiResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface FaceCapturePayload {
+  imageBase64: string;
+  challenge: 'blink' | 'turn_left' | 'turn_right';
+  landmarkSequence: { tMs: number; eyeAspectRatio: number; headYawDeg: number }[];
+}
+
+export interface FaceStatus {
+  enrolled: boolean;
+  enrolledAt?: string | null;
+}
+
+export interface FaceVerifyResult {
+  match: boolean;
+  similarity?: number;
+  /** True when /api/face/verify reports no enrollment exists — caller should fall back to password. */
+  enrolled?: boolean;
+  error?: string;
+}
+
+/** Enrolls a face for the signed-in session. Requires an active session. */
+export async function enrollFace(payload: FaceCapturePayload): Promise<FaceApiResult> {
+  try {
+    const res = await fetch('/api/face/enroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error ?? 'Could not set up Face ID.' };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Could not reach the server. Check your connection and try again.' };
+  }
+}
+
+/** Verifies a live face capture against the signed-in user's stored embedding. */
+export async function verifyFace(payload: FaceCapturePayload): Promise<FaceVerifyResult> {
+  try {
+    const res = await fetch('/api/face/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.enrolled === false) return { match: false, enrolled: false };
+    if (!res.ok) return { match: false, error: data.error ?? 'Verification failed.' };
+    return { match: !!data.match, similarity: data.similarity };
+  } catch {
+    return { match: false, error: 'Could not reach the server. Check your connection and try again.' };
+  }
+}
+
+/** Whether the signed-in user has an active face enrollment. */
+export async function getFaceStatus(): Promise<FaceStatus> {
+  try {
+    const res = await fetch('/api/face/status', { cache: 'no-store' });
+    if (!res.ok) throw new Error('status check failed');
+    return (await res.json()) as FaceStatus;
+  } catch {
+    return { enrolled: false };
+  }
+}
+
+/** Soft-deletes the signed-in user's face enrollment. */
+export async function deleteFace(): Promise<FaceApiResult> {
+  try {
+    const res = await fetch('/api/face/delete', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error ?? 'Could not delete Face ID data.' };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Could not reach the server. Check your connection and try again.' };
+  }
+}
+
+/** Fire-and-forget: wakes the Python face service ahead of time. Never throws. */
+export function pingFaceWarmup(): void {
+  fetch('/api/face/warmup').catch(() => {});
+}

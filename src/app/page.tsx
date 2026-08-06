@@ -108,11 +108,31 @@ export default function LandingPage() {
             </div>
 
             <div className="landing__chart" aria-hidden="true">
-              <span className="landing__chart-line" />
-              <span className="landing__chart-dot landing__chart-dot--one" />
-              <span className="landing__chart-dot landing__chart-dot--two" />
-              <span className="landing__chart-dot landing__chart-dot--three" />
-              <span className="landing__chart-dot landing__chart-dot--four" />
+              <svg
+                className="landing__chart-svg"
+                viewBox="0 0 360 100"
+                preserveAspectRatio="none"
+                role="presentation"
+              >
+                <defs>
+                  <linearGradient id="landing-chart-fill" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.2" />
+                    <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path
+                  className="landing__chart-area"
+                  d="M0 78 C35 76 45 62 82 64 S128 48 162 52 S205 34 238 39 S286 18 360 10 V100 H0 Z"
+                />
+                <path
+                  className="landing__chart-path"
+                  d="M0 78 C35 76 45 62 82 64 S128 48 162 52 S205 34 238 39 S286 18 360 10"
+                />
+                <circle className="landing__chart-point" cx="82" cy="64" r="4" />
+                <circle className="landing__chart-point" cx="162" cy="52" r="4" />
+                <circle className="landing__chart-point" cx="238" cy="39" r="4" />
+                <circle className="landing__chart-point" cx="360" cy="10" r="4" />
+              </svg>
             </div>
 
             <div className="landing__visual-footer">

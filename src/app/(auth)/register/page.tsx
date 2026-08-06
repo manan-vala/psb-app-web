@@ -68,7 +68,7 @@ export default function RegisterScreen() {
         );
         return;
       }
-      router.replace('/set-pin');
+      router.replace('/face-enroll');
     }, 600);
   };
 

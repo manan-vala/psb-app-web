@@ -8,7 +8,7 @@ import { AVATAR_URL } from '@/constants/mock';
 import { useAlert } from '@/context/AlertContext';
 import { useDrawer } from '@/context/DrawerContext';
 import { useTelemetry } from '@/context/TelemetryContext';
-import { getAuthStatus, logout, type UserProfile } from '@/services/auth';
+import { getAuthStatus, logout, getFaceStatus, deleteFace, type UserProfile, type FaceStatus } from '@/services/auth';
 
 /** Port of the Expo app's `(app)/settings.tsx`. */
 export default function SettingsScreen() {
@@ -19,10 +19,26 @@ export default function SettingsScreen() {
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pushEnabled, setPushEnabled] = useState(true);
+  const [faceStatus, setFaceStatus] = useState<FaceStatus | null>(null);
 
   useEffect(() => {
     getAuthStatus().then((status) => setProfile(status.profile));
+    getFaceStatus().then(setFaceStatus);
   }, []);
+
+  const handleDeleteFace = () => {
+    showAlert('Delete Face Data?', 'This removes your stored face embedding. You can set it up again anytime.', [
+      {
+        text: 'Delete',
+        onPress: async () => {
+          const result = await deleteFace();
+          if (result.ok) setFaceStatus({ enrolled: false });
+          else showAlert('Something went wrong', result.error ?? 'Could not delete Face ID data.');
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
 
   const comingSoon = (feature: string) =>
     showAlert('Coming Soon', `${feature} will be available in a future update.`);
@@ -85,6 +101,60 @@ export default function SettingsScreen() {
               </span>
               <Icon name="chevron-right" size={22} color="var(--on-surface-variant)" />
             </button>
+
+            <div className="divider" />
+
+            {faceStatus?.enrolled ? (
+              <>
+                <button className="row" onClick={() => router.push('/face-enroll?mode=reenroll')}>
+                  <span className="row__icon">
+                    <Icon name="face" size={22} />
+                  </span>
+                  <span className="row__body">
+                    <span className="row__label" style={{ display: 'block' }}>
+                      Face ID
+                    </span>
+                    <span className="row__sub" style={{ display: 'block' }}>
+                      Active
+                      {faceStatus.enrolledAt
+                        ? ` — enrolled on ${new Date(faceStatus.enrolledAt).toLocaleDateString('en-IN', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                          })}`
+                        : ''}
+                    </span>
+                  </span>
+                  <Icon name="chevron-right" size={22} color="var(--on-surface-variant)" />
+                </button>
+                <div className="divider" />
+                <button className="row" onClick={handleDeleteFace}>
+                  <span className="row__icon">
+                    <Icon name="delete-outline" size={22} />
+                  </span>
+                  <span className="row__body">
+                    <span className="row__label" style={{ display: 'block', color: 'var(--error)' }}>
+                      Delete Face Data
+                    </span>
+                  </span>
+                </button>
+              </>
+            ) : (
+              <button className="row" onClick={() => router.push('/face-enroll')}>
+                <span className="row__icon">
+                  <Icon name="face" size={22} />
+                </span>
+                <span className="row__body">
+                  <span className="row__label" style={{ display: 'block' }}>
+                    Face ID
+                  </span>
+                  <span className="row__sub" style={{ display: 'block' }}>
+                    Not set up
+                  </span>
+                </span>
+                <Icon name="chevron-right" size={22} color="var(--on-surface-variant)" />
+              </button>
+            )}
           </div>
 
           {/* Live session risk — the web build surfaces what the native app
