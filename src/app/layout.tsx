@@ -47,7 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        {process.env.NODE_ENV === "development" && <Agentation />}
+        {/* {process.env.NODE_ENV === "development" && <Agentation />} */}
         <BalanceProvider>
           <TelemetryProvider>
             <AppShell>{children}</AppShell>
