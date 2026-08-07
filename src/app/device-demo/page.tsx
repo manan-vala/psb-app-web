@@ -51,12 +51,6 @@ export default function DeviceDemoPage() {
             <span className="dd__eyebrow-dot" />
             Scenario B · Device binding
           </span>
-          <h1>A password alone shouldn&rsquo;t be enough.</h1>
-          <p>
-            Stolen credentials are worthless if they only work on hardware the customer
-            already owns. Signing in from an unknown device needs approval from a known
-            one — and the code only ever appears on the device the customer is holding.
-          </p>
         </div>
         <Link href="/demo" className="dd__back">
           <Icon name="arrow-back" size={17} />

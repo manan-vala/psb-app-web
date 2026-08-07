@@ -462,6 +462,7 @@ ul {
 .scenario__card {
   display: flex;
   flex-direction: column;
+  gap: 16px;
   padding: clamp(16px, 2.2vh, 24px);
   border: 1px solid var(--landing-line);
   border-radius: 20px;
@@ -722,7 +723,7 @@ ul {
 /* Phones must share the row with a header and footer, so they can't use the
    full-viewport height the single-phone stage assumes. */
 .dd .phone {
-  height: clamp(440px, calc(100dvh - 290px), 600px);
+  height: clamp(540px, calc(100dvh - 150px), 750px);
   min-height: 0;
 }
 
