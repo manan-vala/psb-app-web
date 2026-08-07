@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon } from '@/components/ui/Icon';
 import { Button } from '@/components/ui/Button';
@@ -20,8 +20,16 @@ const MultiPoseEnroll = dynamic(
 
 type Stage = 'consent' | 'camera' | 'success';
 
-/** Step 3 of registration (spec v2 §10): /register → /face-enroll → /set-pin → /home. */
-export default function FaceEnrollScreen() {
+/**
+ * Step 3 of registration (spec v2 §10):
+ * /register → /pending-approval → /face-enroll → /set-pin → /home.
+ *
+ * Split from the default export so `useSearchParams` sits inside a Suspense
+ * boundary. Next 15 refuses to prerender a page that reads search params
+ * outside one, because the params aren't known until the request arrives —
+ * without this the production build fails on this route.
+ */
+function FaceEnrollScreenInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showAlert = useAlert();
@@ -147,6 +155,20 @@ export default function FaceEnrollScreen() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function FaceEnrollScreen() {
+  return (
+    <Suspense
+      fallback={
+        <div className="screen screen--centered">
+          <span className="spinner" />
+        </div>
+      }
+    >
+      <FaceEnrollScreenInner />
+    </Suspense>
   );
 }
 
