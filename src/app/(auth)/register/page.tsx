@@ -1,19 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BobLogo } from '@/components/ui/BobLogo';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useAlert } from '@/context/AlertContext';
+import { useDemoAutofill } from '@/context/DemoAutofillContext';
 import { useTelemetry } from '@/context/TelemetryContext';
+import { useDeviceFingerprint } from '@/hooks/useDeviceFingerprint';
 import { registerAccount } from '@/services/auth';
 
-/** Port of the Expo app's `(auth)/register.tsx`. */
+/**
+ * Port of the Expo app's `(auth)/register.tsx`.
+ *
+ * Registration no longer lands in the app. It submits the account for bank
+ * approval and hands off to `/pending-approval`, which polls until an analyst
+ * decides — see DEMO-IMPLEMENTATION-PLAN.md §3.
+ */
 export default function RegisterScreen() {
   const router = useRouter();
   const showAlert = useAlert();
   const { keystrokeInputProps, pasteHandlers } = useTelemetry();
+  const { fingerprintHash } = useDeviceFingerprint();
+  const { applicant, consume } = useDemoAutofill();
 
   const [fullName, setFullName] = useState('');
   const [mobile, setMobile] = useState('');
@@ -22,6 +32,19 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+
+  // Demo autofill: the panel beside the phone publishes a generated applicant,
+  // this writes it into the form. Consumed immediately so pressing the same
+  // button again republishes and refills rather than being a no-op.
+  useEffect(() => {
+    if (!applicant) return;
+    setFullName(applicant.fullName);
+    setMobile(applicant.mobile);
+    setAccountNumber(applicant.accountNumber);
+    setPassword(applicant.password);
+    setConfirmPassword(applicant.password);
+    consume();
+  }, [applicant, consume]);
 
   const passwordRules = [
     { label: 'At least 8 characters', met: password.length >= 8 },
@@ -56,7 +79,13 @@ export default function RegisterScreen() {
           mobile: mobile.trim(),
           accountNumber: accountNumber.trim(),
         },
-        password
+        password,
+        // The device this account was enrolled on. Approving the request also
+        // marks this device trusted, which is what stops the very first login
+        // from asking the user to verify against a trusted device they don't
+        // have yet. If the fingerprint hook hasn't resolved, the server falls
+        // back to a user-agent hash rather than dropping the binding.
+        fingerprintHash ? { fingerprint: fingerprintHash, label: '' } : undefined
       );
       setLoading(false);
       if (!result.ok) {
@@ -66,7 +95,7 @@ export default function RegisterScreen() {
         );
         return;
       }
-      router.replace('/face-enroll');
+      router.replace('/pending-approval');
     }, 600);
   };
 
