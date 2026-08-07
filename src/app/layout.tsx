@@ -21,7 +21,7 @@ const workSans = Work_Sans({
 });
 
 export const metadata: Metadata = {
-  title: 'Bob World — Aegis',
+  title: 'Bob World : Aegis App',
   description:
     'Web build of the PSB Identity Trust System banking app, with continuous risk scoring.',
 };

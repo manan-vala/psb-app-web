@@ -59,7 +59,12 @@ export default function LandingPage() {
           </p>
 
           <div className="landing__actions">
-            <Link href="/register" className="landing__primary-action">
+            {/*
+              Routes through the scenario briefing rather than straight to the
+              form. The registration screen only means something once the
+              audience knows what it's being checked against.
+            */}
+            <Link href="/demo" className="landing__primary-action">
               Get started
               <Icon name="arrow-forward" size={20} />
             </Link>
