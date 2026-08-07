@@ -120,14 +120,24 @@ export function FaceCamera({
   // frames, kick off the liveness challenge exactly once per attempt. In
   // manual mode this is driven by the Capture button instead.
   useEffect(() => {
-    if (captureMode === 'auto' && mediapipe.guideState === 'stable' && !challengeStartedRef.current && !captured) {
+    // `disabled` is honoured here as well as on the manual button. Without it,
+    // auto mode would start a fresh challenge while the parent still had the
+    // previous capture in flight — so a caller counting attempts could be
+    // handed two before it had finished judging the first.
+    if (
+      captureMode === 'auto' &&
+      !disabled &&
+      mediapipe.guideState === 'stable' &&
+      !challengeStartedRef.current &&
+      !captured
+    ) {
       beginChallenge();
     }
     if (mediapipe.guideState !== 'stable' && liveness.status === 'idle') {
       challengeStartedRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediapipe.guideState, captured, captureMode]);
+  }, [mediapipe.guideState, captured, captureMode, disabled]);
 
   // Feed every reading to the liveness sampler while a challenge is running.
   //

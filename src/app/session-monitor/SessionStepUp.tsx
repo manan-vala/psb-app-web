@@ -1,7 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from '@/components/ui/Icon';
 import { PinDots, PinKeypad } from '@/components/ui/PinKeypad';
 import type { FaceCapturePayload } from '@/components/ui/FaceCamera';
@@ -13,8 +13,15 @@ const FaceCamera = dynamic(() => import('@/components/ui/FaceCamera').then((m) =
 
 type Stage = 'pin' | 'face' | 'done';
 
-/** Second wrong face blocks the transfer. */
-const MAX_FACE_MISMATCHES = 2;
+/**
+ * Total face attempts allowed, counting every kind of failure.
+ *
+ * Not "mismatches": a capture the service rejects outright — no face in frame,
+ * liveness not satisfied — is still a failed check and still consumes a try.
+ * Counting only clean non-matches left the number of attempts unbounded, which
+ * is how repeatedly failing eventually got somebody through.
+ */
+const MAX_FACE_ATTEMPTS = 2;
 
 export interface StepUpOutcome {
   /** Failed face checks, so the caller can re-score and record the escalation. */
@@ -60,7 +67,13 @@ export function SessionStepUp({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [mismatches, setMismatches] = useState(0);
+  // Held in a ref as well as state. Auto-capture can fire again before React
+  // has re-rendered, and reading the count from the render closure let two
+  // captures both compute "attempt 1", so the limit was never reached. The ref
+  // is the source of truth for the decision; the state copy only drives the UI.
+  const attemptsRef = useRef(0);
+  const [attempts, setAttempts] = useState(0);
+
   const [cameraKey, setCameraKey] = useState(0);
   const [serviceRetried, setServiceRetried] = useState(false);
   const [identityChecked, setIdentityChecked] = useState(true);
@@ -94,7 +107,30 @@ export function SessionStepUp({
   const clear = (checked: boolean) => {
     setIdentityChecked(checked);
     setStage('done');
-    setTimeout(() => onSuccess({ faceMismatches: mismatches, identityChecked: checked }), 900);
+    setTimeout(
+      () => onSuccess({ faceMismatches: attemptsRef.current, identityChecked: checked }),
+      900
+    );
+  };
+
+  /**
+   * Records one failed face check and decides whether the transfer survives it.
+   *
+   * Every failure route goes through here, so the attempt limit cannot be
+   * sidestepped by failing in a way that used to be classified differently.
+   */
+  const registerFailure = (message: string) => {
+    const used = attemptsRef.current + 1;
+    attemptsRef.current = used;
+    setAttempts(used);
+
+    if (used >= MAX_FACE_ATTEMPTS) {
+      onBlocked({ faceMismatches: used, identityChecked: true });
+      return;
+    }
+
+    setError(`${message} One more failed attempt will stop the transfer.`);
+    setCameraKey((k) => k + 1);
   };
 
   const submitFace = async (capture: FaceCapturePayload) => {
@@ -114,9 +150,11 @@ export function SessionStepUp({
       });
       const data = await res.json();
 
-      // Service unreachable. One retry covers a cold start on Render's free
-      // tier; after that the PIN alone carries the step up, because refusing a
-      // customer over an outage is the wrong failure mode.
+      // Genuinely unreachable: a 5xx, a timeout, or a dead network. This is the
+      // only path that can still clear the step up without a match, and it is
+      // deliberately narrow — the route now reports a rejected capture as a
+      // failed check rather than an outage, so this no longer fires for "no
+      // face in frame" or a failed liveness pass.
       if (!res.ok) {
         if (!serviceRetried) {
           setServiceRetried(true);
@@ -140,19 +178,13 @@ export function SessionStepUp({
         return;
       }
 
-      // A live face, but somebody else.
-      const next = mismatches + 1;
-      setMismatches(next);
-
-      if (next >= MAX_FACE_MISMATCHES) {
-        onBlocked({ faceMismatches: next, identityChecked: true });
-        return;
-      }
-
-      setError(
-        'That is not the face registered to this account. One more failed attempt will stop the transfer.'
+      // Either a live face that is somebody else, or a capture the service
+      // refused to read. Both are failed checks and both consume an attempt.
+      registerFailure(
+        data.rejected
+          ? 'That capture could not be verified.'
+          : 'That is not the face registered to this account.'
       );
-      setCameraKey((k) => k + 1);
     } catch {
       if (!serviceRetried) {
         setServiceRetried(true);
@@ -226,7 +258,7 @@ export function SessionStepUp({
         {stage === 'face' && (
           <>
             <p className="sm-stepup__prompt">
-              {mismatches > 0
+              {attempts > 0
                 ? 'Last attempt. Show the face registered to this account.'
                 : 'Look at the camera and follow the prompt'}
             </p>
@@ -237,11 +269,10 @@ export function SessionStepUp({
               onError={(msg) => setError(msg)}
               disabled={busy}
             />
-            {mismatches > 0 && (
+            {attempts > 0 && (
               <p className="sm-stepup__strike">
                 <Icon name="gpp-bad" size={14} />
-                {mismatches} failed face check
-                {mismatches === 1 ? '' : 's'}
+                {attempts} of {MAX_FACE_ATTEMPTS} attempts used
               </p>
             )}
           </>

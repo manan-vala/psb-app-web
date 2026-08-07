@@ -83,12 +83,31 @@ export async function POST(req: Request) {
       confidence: result.confidence,
     });
   } catch (err) {
-    // 404 from the service means it lost the template between our check and
-    // the call — treat it the same as never having had one.
+    // 404 means the service lost the template between our check and the call —
+    // treat it the same as never having had one.
     if (err instanceof FaceApiError && err.status === 404) {
       return NextResponse.json({ enrolled: false });
     }
-    console.error('demo face verify failed:', err);
+
+    // Any other 4xx is the service *rejecting this capture*: no face found in
+    // the frame, liveness not satisfied, image unusable. That is a failed
+    // verification, not an outage, and it has to count against the attempt
+    // limit like any other failure.
+    //
+    // Collapsing these into "unavailable" is what let an unrecognised person
+    // through: the caller's outage path clears the step up, so anyone whose
+    // captures merely errored was waved past without ever being compared.
+    if (err instanceof FaceApiError && err.status >= 400 && err.status < 500) {
+      return NextResponse.json({
+        enrolled: true,
+        match: false,
+        rejected: true,
+        reason: err.message,
+      });
+    }
+
+    // Genuinely unreachable: a 5xx, a timeout, or a network failure.
+    console.error('demo face verify unavailable:', err);
     return NextResponse.json(
       { error: 'Could not reach the face service.', unavailable: true },
       { status: 502 }
