@@ -1,7 +1,9 @@
 'use client';
 
+import { usePathname } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Icon } from './ui/Icon';
+import { RegisterDemoPanel } from './RegisterDemoPanel';
 
 /**
  * Renders the app inside a device mockup on desktop. On narrow viewports the
@@ -14,13 +16,14 @@ import { Icon } from './ui/Icon';
  * than floating centered next to the phone). Every other route is
  * unaffected — no `sidebar` prop means the original centered layout.
  */
-export function PhoneFrame({
-  children,
-  sidebar,
-}: {
-  children: ReactNode;
-  sidebar?: ReactNode;
-}) {
+/**
+ * The device mockup itself — bezel, notch, status bar, home indicator.
+ *
+ * Exported separately from `PhoneFrame` because the device-binding demo puts
+ * two phones side by side on one page, and needs the chrome without the
+ * single-phone stage layout wrapped around it.
+ */
+export function PhoneChrome({ children }: { children: ReactNode }) {
   const [clock, setClock] = useState('');
 
   useEffect(() => {
@@ -37,7 +40,7 @@ export function PhoneFrame({
     return () => clearInterval(id);
   }, []);
 
-  const phone = (
+  return (
     <div className="phone">
       <div className="phone__screen">
         <span className="phone__notch" />
@@ -57,6 +60,18 @@ export function PhoneFrame({
       </div>
     </div>
   );
+}
+
+export function PhoneFrame({
+  children,
+  sidebar,
+}: {
+  children: ReactNode;
+  sidebar?: ReactNode;
+}) {
+  const pathname = usePathname();
+
+  const phone = <PhoneChrome>{children}</PhoneChrome>;
 
   if (sidebar) {
     return (
@@ -77,6 +92,11 @@ export function PhoneFrame({
             A live build of the PSB banking app. Behavioural, device, network and
             journey telemetry is scored continuously by the Aegis backend.
           </p>
+          {/*
+            Only on /register — it fills that form specifically, and there's
+            nothing for it to autofill anywhere else.
+          */}
+          {pathname === '/register' && <RegisterDemoPanel />}
         </div>
       </div>
     </div>
