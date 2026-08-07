@@ -5,8 +5,8 @@ import { PhoneFrame } from '@/components/PhoneFrame';
 import { Button } from '@/components/ui/Button';
 import { Icon } from '@/components/ui/Icon';
 import { Input } from '@/components/ui/Input';
-import { RiskSidebar, type Assessment, type Baseline } from './RiskSidebar';
-import { SessionStepUp } from './SessionStepUp';
+import { RiskSidebar, type Assessment, type Baseline, type KeystrokeEvent } from './RiskSidebar';
+import { SessionStepUp, type StepUpOutcome } from './SessionStepUp';
 
 const DEMO_ACCOUNT = '10250043100782';
 
@@ -15,17 +15,14 @@ type Phase = 'form' | 'stepup' | 'blocked' | 'sent';
 /**
  * Scenario C — a real transfer, scored as it's made.
  *
- * The layout is the one `/analyze` already uses: the phone docked left, a live
- * telemetry panel filling the right. What's new is that the panel leads with a
- * verdict, and that the verdict comes from the server rather than the browser.
- *
- * Keystroke timing is captured on the amount field — the gaps between keys, not
- * the keys themselves. Nothing that could reconstruct what was typed leaves the
- * page.
+ * Keystroke timing is captured on BOTH the payee name and amount fields.
+ * We capture dwell time (keydown→keyup for each key) and flight time
+ * (keyup of previous key → keydown of current key). The gaps between
+ * consecutive keydowns are also collected as intervals for the risk engine.
  */
 export default function SessionMonitorPage() {
   const [amount, setAmount] = useState('');
-  const [payee, setPayee] = useState('Rahul Sharma');
+  const [payee, setPayee] = useState('');
   const [phase, setPhase] = useState<Phase>('form');
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   const [baseline, setBaseline] = useState<Baseline | null>(null);
@@ -37,19 +34,57 @@ export default function SessionMonitorPage() {
     []
   );
 
-  // Gaps between keystrokes on the amount field. Timestamps stay in a ref so
-  // typing doesn't re-render the page on every key.
-  const lastKeyAt = useRef<number | null>(null);
+  // ── Keystroke capture (both fields) ─────────────────────────────────────
+  // intervals: gaps between consecutive keydowns (for the risk engine).
+  // keystrokeEvents: richer per-key data for the sidebar visualisation.
+  const lastKeyDownAt = useRef<number | null>(null);
+  const lastKeyUpAt = useRef<number | null>(null);
+  const pendingKeyDownAt = useRef<number | null>(null);
   const intervals = useRef<number[]>([]);
+  const [keystrokeEvents, setKeystrokeEvents] = useState<KeystrokeEvent[]>([]);
   const [keyCount, setKeyCount] = useState(0);
+  const keystrokeIndexRef = useRef(0);
 
-  const recordKeystroke = useCallback(() => {
+  const handleKeyDown = useCallback(() => {
     const now = performance.now();
-    if (lastKeyAt.current !== null) {
-      intervals.current = [...intervals.current, now - lastKeyAt.current].slice(-40);
+
+    // Interval between consecutive keydowns (for risk engine)
+    if (lastKeyDownAt.current !== null) {
+      intervals.current = [...intervals.current, now - lastKeyDownAt.current].slice(-40);
     }
-    lastKeyAt.current = now;
+
+    // Flight time: gap between last keyup and this keydown
+    const flight = lastKeyUpAt.current !== null ? Math.round(now - lastKeyUpAt.current) : null;
+
+    pendingKeyDownAt.current = now;
+    lastKeyDownAt.current = now;
+
+    // We create the event on keydown with flight, dwell gets filled on keyup.
+    // Store the index so keyup can find it.
+    const idx = keystrokeIndexRef.current++;
+    setKeystrokeEvents((prev) => {
+      const next = [
+        ...prev,
+        { index: idx, dwellMs: null, flightMs: flight },
+      ].slice(-10);
+      return next;
+    });
+
     setKeyCount((c) => c + 1);
+  }, []);
+
+  const handleKeyUp = useCallback(() => {
+    const now = performance.now();
+    const downAt = pendingKeyDownAt.current;
+    if (downAt !== null) {
+      const dwell = Math.round(now - downAt);
+      const idx = keystrokeIndexRef.current - 1;
+      setKeystrokeEvents((prev) =>
+        prev.map((evt) => (evt.index === idx && evt.dwellMs === null ? { ...evt, dwellMs: dwell } : evt))
+      );
+    }
+    lastKeyUpAt.current = now;
+    pendingKeyDownAt.current = null;
   }, []);
 
   useEffect(() => {
@@ -59,12 +94,16 @@ export default function SessionMonitorPage() {
       .catch(() => {});
   }, []);
 
-  const submit = async () => {
-    const value = Number(amount);
-    if (!value || value <= 0) return;
+  /**
+   * Scores the current transfer. Called on submit, and again when a step up
+   * ends, so failed face checks are folded into the score and reach the bank
+   * console as their own event rather than staying in the client.
+   */
+  const score = useCallback(
+    async (faceMismatches: number): Promise<Assessment | null> => {
+      const value = Number(amount);
+      if (!value || value <= 0 || !payee.trim()) return null;
 
-    setBusy(true);
-    try {
       const res = await fetch('/api/session/assess', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -74,10 +113,20 @@ export default function SessionMonitorPage() {
           screen: '/transfer',
           keystrokeIntervals: intervals.current,
           amount: value,
-          payee,
+          payee: payee.trim(),
+          faceMismatches,
         }),
       });
-      const result = (await res.json()) as Assessment;
+      return (await res.json()) as Assessment;
+    },
+    [amount, payee, sessionId]
+  );
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const result = await score(0);
+      if (!result) return;
       setAssessment(result);
 
       if (result.action === 'BLOCK') setPhase('blocked');
@@ -88,13 +137,32 @@ export default function SessionMonitorPage() {
     }
   };
 
+  /** Step up cleared. Re-score so the console records how it ended. */
+  const handleStepUpSuccess = async (outcome: StepUpOutcome) => {
+    const result = await score(outcome.faceMismatches);
+    if (result) setAssessment(result);
+    setPhase('sent');
+  };
+
+  /** Two wrong faces. Re-scoring pushes the total past the block threshold. */
+  const handleStepUpBlocked = async (outcome: StepUpOutcome) => {
+    const result = await score(outcome.faceMismatches);
+    if (result) setAssessment(result);
+    setPhase('blocked');
+  };
+
   const reset = () => {
     setPhase('form');
     setAmount('');
+    setPayee('');
     setAssessment(null);
     intervals.current = [];
-    lastKeyAt.current = null;
+    lastKeyDownAt.current = null;
+    lastKeyUpAt.current = null;
+    pendingKeyDownAt.current = null;
+    setKeystrokeEvents([]);
     setKeyCount(0);
+    keystrokeIndexRef.current = 0;
   };
 
   return (
@@ -105,6 +173,7 @@ export default function SessionMonitorPage() {
           baseline={baseline}
           sessionId={sessionId}
           keystrokeSamples={Math.max(0, keyCount - 1)}
+          keystrokeEvents={keystrokeEvents}
           liveAmount={Number(amount) || null}
         />
       }
@@ -137,14 +206,22 @@ export default function SessionMonitorPage() {
               <p className="t-body-sm c-variant">From your savings account</p>
             </div>
 
-            <Input label="To" value={payee} onValueChange={setPayee} />
+            <Input
+              label="To"
+              value={payee}
+              placeholder="Payee name"
+              onValueChange={setPayee}
+              onKeyDown={handleKeyDown}
+              onKeyUp={handleKeyUp}
+            />
             <Input
               label="Amount (₹)"
               value={amount}
               inputMode="numeric"
               placeholder="0"
               onValueChange={(v) => setAmount(v.replace(/[^0-9]/g, ''))}
-              onKeyDown={recordKeystroke}
+              onKeyDown={handleKeyDown}
+              onKeyUp={handleKeyUp}
             />
 
             {baseline?.highValueThreshold && Number(amount) > baseline.highValueThreshold && (
@@ -159,11 +236,11 @@ export default function SessionMonitorPage() {
               icon="arrow-forward"
               onClick={submit}
               loading={busy}
-              disabled={!amount}
+              disabled={!amount || !payee.trim()}
             />
 
             <p className="sm-screen__hint">
-              Try ₹2,000 typed normally, then ₹42,000 pasted or typed very fast.
+              Type the name and amount normally, then try again typing super fast.
             </p>
           </>
         )}
@@ -172,7 +249,8 @@ export default function SessionMonitorPage() {
           <SessionStepUp
             accountNumber={DEMO_ACCOUNT}
             reasons={assessment.reasons}
-            onSuccess={() => setPhase('sent')}
+            onSuccess={handleStepUpSuccess}
+            onBlocked={handleStepUpBlocked}
             onCancel={reset}
           />
         )}

@@ -12,6 +12,8 @@ interface Body {
   keystrokeIntervals?: number[];
   amount?: number;
   payee?: string;
+  /** Failed face checks so far in this step up. Raises the score each time. */
+  faceMismatches?: number;
   /** Set once the customer has cleared a step-up, to record the outcome. */
   stepUpCleared?: boolean;
 }
@@ -63,6 +65,7 @@ export async function POST(req: Request) {
     keystrokeIntervals: body.keystrokeIntervals,
     amount: body.amount,
     baselineAverage,
+    faceMismatches: body.faceMismatches,
   });
 
   await sql`

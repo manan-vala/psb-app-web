@@ -19,13 +19,21 @@
 
 export type RiskAction = 'ALLOW' | 'STEP_UP' | 'BLOCK';
 
-export type RiskFlag = 'ROBOTIC_TYPING' | 'HIGH_VALUE_VS_BASELINE';
+export type RiskFlag = 'ROBOTIC_TYPING' | 'HIGH_VALUE_VS_BASELINE' | 'FACE_MISMATCH';
 
 /** One signal steps up; two together block. */
 const WEIGHTS: Record<RiskFlag, number> = {
   ROBOTIC_TYPING: 45,
   HIGH_VALUE_VS_BASELINE: 45,
+  // Per failed face check, and cumulative. Sized so that alongside an existing
+  // signal the first wrong face keeps the score inside STEP_UP (45 + 20 = 65)
+  // and the second crosses BLOCK (45 + 40 = 85). One failed biometric can be
+  // bad lighting; two is a pattern.
+  FACE_MISMATCH: 20,
 };
+
+/** Beyond this, extra mismatches add nothing — the verdict is already BLOCK. */
+const MAX_COUNTED_FACE_MISMATCHES = 2;
 
 const STEP_UP_AT = 40;
 const BLOCK_AT = 80;
@@ -58,6 +66,8 @@ export interface AssessmentInput {
   amount?: number;
   /** The customer's mean transaction over the last 30 days. */
   baselineAverage?: number | null;
+  /** How many times a step up face check has come back as somebody else. */
+  faceMismatches?: number;
 }
 
 export interface Assessment {
@@ -75,6 +85,7 @@ export interface Assessment {
     amount: number | null;
     baselineAverage: number | null;
     timesBaseline: number | null;
+    faceMismatches: number;
   };
 }
 
@@ -128,8 +139,27 @@ export function assess(input: AssessmentInput): Assessment {
     }
   }
 
+  /* ── Rule 3: the face at the step up is not the enrolled one ───────────── */
+  const faceMismatches = Math.max(0, Math.floor(input.faceMismatches ?? 0));
+  const countedMismatches = Math.min(faceMismatches, MAX_COUNTED_FACE_MISMATCHES);
+
+  if (faceMismatches > 0) {
+    flags.push('FACE_MISMATCH');
+    reasons.push(
+      faceMismatches === 1
+        ? 'The face at the security check did not match the one enrolled on this account.'
+        : `${faceMismatches} failed face checks at the security prompt. The person completing this transfer is not the account holder.`
+    );
+  }
+
   /* ── Score and verdict ─────────────────────────────────────────────────── */
-  const rawScore = flags.reduce((sum, flag) => sum + WEIGHTS[flag], 0);
+  // FACE_MISMATCH is scored per occurrence rather than once, which is why the
+  // total is built from weights directly instead of summing over flags.
+  const rawScore = flags.reduce(
+    (sum, flag) =>
+      sum + (flag === 'FACE_MISMATCH' ? WEIGHTS[flag] * countedMismatches : WEIGHTS[flag]),
+    0
+  );
   const riskScore = Math.min(100, rawScore);
 
   const action: RiskAction =
@@ -138,10 +168,17 @@ export function assess(input: AssessmentInput): Assessment {
   // Each engine starts clean and only its own flags pull it down. Network and
   // device have no rules in this build, so they stay at 100 — which is honest
   // rather than decorative: nothing is being measured there.
+  // A failed face check lands on `behavior` alongside robotic typing: both
+  // answer the same question, which is whether the human driving this session
+  // is the one the account belongs to.
+  const behaviorPenalty =
+    (flags.includes('ROBOTIC_TYPING') ? WEIGHTS.ROBOTIC_TYPING : 0) +
+    WEIGHTS.FACE_MISMATCH * countedMismatches;
+
   const engines: RiskEngines = {
     network: 100,
     device: 100,
-    behavior: flags.includes('ROBOTIC_TYPING') ? 100 - WEIGHTS.ROBOTIC_TYPING : 100,
+    behavior: Math.max(0, 100 - behaviorPenalty),
     journey: flags.includes('HIGH_VALUE_VS_BASELINE')
       ? 100 - WEIGHTS.HIGH_VALUE_VS_BASELINE
       : 100,
@@ -160,6 +197,7 @@ export function assess(input: AssessmentInput): Assessment {
       amount,
       baselineAverage: baseline === null ? null : Math.round(baseline),
       timesBaseline: timesBaseline === null ? null : Number(timesBaseline.toFixed(2)),
+      faceMismatches,
     },
   };
 }

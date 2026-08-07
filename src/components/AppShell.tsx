@@ -38,6 +38,7 @@ import { CaptureSidebar } from '@/app/analyze/CaptureSidebar';
 const FULL_VIEWPORT_ROUTES = new Set([
   '/',
   '/demo',
+  '/demo-setup',
   '/device-demo',
   '/session-monitor',
   '/face-id-test',
