@@ -14,14 +14,22 @@ const FaceCamera = dynamic(() => import('@/components/ui/FaceCamera').then((m) =
 type Stage = 'pin' | 'face' | 'done';
 
 /**
- * Total face attempts allowed, counting every kind of failure.
- *
- * Not "mismatches": a capture the service rejects outright — no face in frame,
- * liveness not satisfied — is still a failed check and still consumes a try.
- * Counting only clean non-matches left the number of attempts unbounded, which
- * is how repeatedly failing eventually got somebody through.
+ * Wrong-face strikes before the transfer is stopped. This is the security
+ * control: two people who are not the account holder and it ends.
  */
-const MAX_FACE_ATTEMPTS = 2;
+const MAX_IDENTITY_STRIKES = 2;
+
+/**
+ * Captures the service could not read — no face found, too small, too dark,
+ * liveness not seen — before giving up.
+ *
+ * Deliberately a separate budget. A 422 says "I could not read this frame",
+ * not "this is somebody else", so spending an identity strike on it is wrong
+ * twice over: it ends a legitimate customer's transfer over bad lighting, and
+ * it reports a camera problem to the bank as attempted fraud. These retries
+ * cost nothing and add nothing to the risk score.
+ */
+const MAX_CAPTURE_RETRIES = 3;
 
 export interface StepUpOutcome {
   /** Failed face checks, so the caller can re-score and record the escalation. */
@@ -67,12 +75,13 @@ export function SessionStepUp({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Held in a ref as well as state. Auto-capture can fire again before React
-  // has re-rendered, and reading the count from the render closure let two
-  // captures both compute "attempt 1", so the limit was never reached. The ref
-  // is the source of truth for the decision; the state copy only drives the UI.
-  const attemptsRef = useRef(0);
-  const [attempts, setAttempts] = useState(0);
+  // Held in refs as well as state. Auto-capture can fire again before React
+  // has re-rendered, and reading a count from the render closure let two
+  // captures both compute "attempt 1", so the limit was never reached. The refs
+  // are the source of truth for decisions; the state copies only drive the UI.
+  const strikesRef = useRef(0);
+  const [strikes, setStrikes] = useState(0);
+  const retriesRef = useRef(0);
 
   const [cameraKey, setCameraKey] = useState(0);
   const [serviceRetried, setServiceRetried] = useState(false);
@@ -108,28 +117,55 @@ export function SessionStepUp({
     setIdentityChecked(checked);
     setStage('done');
     setTimeout(
-      () => onSuccess({ faceMismatches: attemptsRef.current, identityChecked: checked }),
+      () => onSuccess({ faceMismatches: strikesRef.current, identityChecked: checked }),
       900
     );
   };
 
   /**
-   * Records one failed face check and decides whether the transfer survives it.
-   *
-   * Every failure route goes through here, so the attempt limit cannot be
-   * sidestepped by failing in a way that used to be classified differently.
+   * A live face that is demonstrably not the account holder. This is the only
+   * thing that raises the fraud score, and two of them stop the transfer.
    */
-  const registerFailure = (message: string) => {
-    const used = attemptsRef.current + 1;
-    attemptsRef.current = used;
-    setAttempts(used);
+  const registerIdentityStrike = (similarity?: number) => {
+    const used = strikesRef.current + 1;
+    strikesRef.current = used;
+    setStrikes(used);
 
-    if (used >= MAX_FACE_ATTEMPTS) {
+    if (used >= MAX_IDENTITY_STRIKES) {
       onBlocked({ faceMismatches: used, identityChecked: true });
       return;
     }
 
-    setError(`${message} One more failed attempt will stop the transfer.`);
+    const closeness =
+      typeof similarity === 'number' ? ` (match ${(similarity * 100).toFixed(0)}%)` : '';
+    setError(
+      `That is not the face registered to this account${closeness}. One more failed attempt will stop the transfer.`
+    );
+    setCameraKey((k) => k + 1);
+  };
+
+  /**
+   * The service could not read the capture. Not an identity failure, so it
+   * neither raises risk nor spends a strike — but it is bounded, because
+   * unlimited unreadable captures would be a way to sit at the prompt forever.
+   *
+   * The service's own explanation is shown verbatim: "Face quality too low",
+   * "Face too small in frame", "No blink detected" all tell the customer
+   * something they can act on, where a generic failure tells them nothing.
+   */
+  const registerCaptureRetry = (reason?: string) => {
+    const used = retriesRef.current + 1;
+    retriesRef.current = used;
+
+    if (used >= MAX_CAPTURE_RETRIES) {
+      setError(
+        'Your face could not be read clearly enough to verify. Try again in better lighting.'
+      );
+      onBlocked({ faceMismatches: strikesRef.current, identityChecked: false });
+      return;
+    }
+
+    setError(`${reason ?? 'That capture could not be read.'} Adjusting and trying again.`);
     setCameraKey((k) => k + 1);
   };
 
@@ -178,13 +214,14 @@ export function SessionStepUp({
         return;
       }
 
-      // Either a live face that is somebody else, or a capture the service
-      // refused to read. Both are failed checks and both consume an attempt.
-      registerFailure(
-        data.rejected
-          ? 'That capture could not be verified.'
-          : 'That is not the face registered to this account.'
-      );
+      // `rejected` means the service could not read the frame at all, so no
+      // comparison ever happened. Only a genuine non-match is an identity
+      // failure.
+      if (data.rejected) {
+        registerCaptureRetry(data.reason);
+      } else {
+        registerIdentityStrike(data.similarity);
+      }
     } catch {
       if (!serviceRetried) {
         setServiceRetried(true);
@@ -258,7 +295,7 @@ export function SessionStepUp({
         {stage === 'face' && (
           <>
             <p className="sm-stepup__prompt">
-              {attempts > 0
+              {strikes > 0
                 ? 'Last attempt. Show the face registered to this account.'
                 : 'Look at the camera and follow the prompt'}
             </p>
@@ -269,10 +306,10 @@ export function SessionStepUp({
               onError={(msg) => setError(msg)}
               disabled={busy}
             />
-            {attempts > 0 && (
+            {strikes > 0 && (
               <p className="sm-stepup__strike">
                 <Icon name="gpp-bad" size={14} />
-                {attempts} of {MAX_FACE_ATTEMPTS} attempts used
+                {strikes} of {MAX_IDENTITY_STRIKES} failed identity checks
               </p>
             )}
           </>
