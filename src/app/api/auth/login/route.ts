@@ -28,7 +28,7 @@ export async function POST(req: Request) {
 
   const id = identifier.trim();
   const [user] = await sql`
-    SELECT id, password_hash FROM users
+    SELECT id, password_hash, status FROM users
     WHERE mobile = ${id} OR lower(email) = lower(${id})
     LIMIT 1
   `;
@@ -43,6 +43,25 @@ export async function POST(req: Request) {
   const valid = await verifySecret(password, user.password_hash as string);
   if (!valid) {
     return NextResponse.json({ error: 'The password you entered is incorrect.' }, { status: 401 });
+  }
+
+  // Approval gate, checked after the password so that account state is never
+  // disclosed to someone who can't authenticate — otherwise this endpoint
+  // would happily tell a stranger which account numbers are pending review.
+  const status = user.status as string;
+  if (status !== 'ACTIVE') {
+    return NextResponse.json(
+      {
+        error:
+          status === 'PENDING_APPROVAL'
+            ? 'Your registration is still being reviewed by the bank.'
+            : status === 'REJECTED'
+              ? 'This registration was not approved. Please contact your branch.'
+              : 'This account is not currently active. Please contact your branch.',
+        accountStatus: status,
+      },
+      { status: 403 }
+    );
   }
 
   await createSession(user.id as string);

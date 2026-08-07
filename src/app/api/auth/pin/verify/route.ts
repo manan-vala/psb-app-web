@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { verifySecret } from '@/lib/password';
-import { createSession } from '@/lib/session';
+import { createSession, getAnySession } from '@/lib/session';
 
 export const runtime = 'nodejs';
 
@@ -9,12 +9,20 @@ const MAX_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
- * PIN quick-login — the main login screen. This is the closest server
- * equivalent to the native app's device-level PIN unlock: it checks the pin
- * against the sole demo account rather than taking an identifier, matching
- * the original per-device behaviour now that there's one shared account. See
- * the README's "Known limitations" for what this means once real multi-user
- * support is added.
+ * PIN quick-login — the main login screen. The closest server equivalent to
+ * the native app's device-level PIN unlock: it doesn't take an identifier,
+ * because the PIN is a re-entry gesture for a browser that has been here
+ * before rather than a fresh sign-in.
+ *
+ * "Which account?" used to be answered with `ORDER BY created_at LIMIT 1`,
+ * back when the database held exactly one. It now holds several seeded ones,
+ * and that query would pick an arbitrary user — possibly one that is
+ * PENDING_APPROVAL or REJECTED and has no business logging in at all.
+ *
+ * So the account is resolved from the session cookie, which is the thing that
+ * actually identifies this browser's user and is what the login screen already
+ * reads to greet them by name. The fallback below only exists for a browser
+ * with no cookie, and is restricted to ACTIVE accounts that have a PIN set.
  *
  * A successful verify issues a session, exactly like /api/auth/login.
  */
@@ -24,15 +32,43 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Enter your 4-digit PIN.' }, { status: 400 });
   }
 
-  const [user] = await sql`
-    SELECT id, pin_hash, pin_attempts, pin_locked_until
-    FROM users
-    ORDER BY created_at
-    LIMIT 1
-  `;
+  const session = await getAnySession();
+
+  const [user] = session
+    ? await sql`
+        SELECT id, pin_hash, pin_attempts, pin_locked_until, status
+        FROM users
+        WHERE id = ${session.id}
+      `
+    : await sql`
+        SELECT id, pin_hash, pin_attempts, pin_locked_until, status
+        FROM users
+        WHERE status = 'ACTIVE' AND pin_hash IS NOT NULL
+        ORDER BY created_at
+        LIMIT 1
+      `;
 
   if (!user || !user.pin_hash) {
     return NextResponse.json({ error: 'No PIN has been set up yet.' }, { status: 404 });
+  }
+
+  // Same approval gate as /api/auth/login, and checked before the PIN is
+  // compared here rather than after: an account that can't log in shouldn't be
+  // burning its 5-attempt lockout budget either way.
+  const status = user.status as string;
+  if (status !== 'ACTIVE') {
+    return NextResponse.json(
+      {
+        error:
+          status === 'PENDING_APPROVAL'
+            ? 'Your registration is still being reviewed by the bank.'
+            : status === 'REJECTED'
+              ? 'This registration was not approved. Please contact your branch.'
+              : 'This account is not currently active. Please contact your branch.',
+        accountStatus: status,
+      },
+      { status: 403 }
+    );
   }
 
   const lockedUntil = user.pin_locked_until as string | null;

@@ -17,11 +17,28 @@ export interface UserProfile {
   email?: string | null;
 }
 
+/** Mirrors `sessions.scope` — see src/lib/session.ts. */
+export type SessionScope = 'LIMITED' | 'PENDING_DEVICE' | 'FULL';
+
+/** Mirrors `users.status` — see migration 005. */
+export type AccountStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED';
+
 export interface AuthStatus {
-  hasAccount: boolean;
-  hasPin: boolean;
+  /** True only for a FULL-scope session. A user waiting on approval is not authenticated. */
   isAuthenticated: boolean;
+  scope: SessionScope | null;
+  /** Approval state of the account, independent of the session. Null when signed out. */
+  status: AccountStatus | null;
   profile: UserProfile | null;
+  hasPin: boolean;
+  /**
+   * Whether the browser identified by the `fp` argument is a trusted device.
+   * Null means the question wasn't asked, not "no" — pass a fingerprint to
+   * `getAuthStatus` to get a real answer.
+   */
+  deviceTrusted: boolean | null;
+  /** Set only while an account is PENDING_APPROVAL. */
+  pendingRequestId: string | null;
 }
 
 export interface AuthResult {
@@ -55,26 +72,83 @@ async function postJson(path: string, body: unknown): Promise<AuthResult> {
 }
 
 /**
- * Single round trip covering what used to be four separate localStorage
- * reads (`hasAccount`, `hasPin`, `getProfile`, `isSessionActive`). Callers
- * that only need one field still call this and destructure — it's one fetch
- * either way.
+ * Everything the entry screen needs to decide where to send the browser, in
+ * one round trip: whether there's a session, what scope it has, and what state
+ * the account behind it is in.
+ *
+ * Pass `fingerprint` to also get a `deviceTrusted` answer for this specific
+ * browser; without it that field stays null.
  */
-export async function getAuthStatus(): Promise<AuthStatus> {
+export async function getAuthStatus(fingerprint?: string): Promise<AuthStatus> {
+  const query = fingerprint ? `?fp=${encodeURIComponent(fingerprint)}` : '';
   try {
-    const res = await fetch('/api/auth/status', { cache: 'no-store' });
+    const res = await fetch(`/api/auth/status${query}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('status check failed');
     return (await res.json()) as AuthStatus;
   } catch {
     // Fail closed on the routing decision (send to register) but don't crash
     // the entry screen — the user can retry.
-    return { hasAccount: false, hasPin: false, isAuthenticated: false, profile: null };
+    return {
+      isAuthenticated: false,
+      scope: null,
+      status: null,
+      profile: null,
+      hasPin: false,
+      deviceTrusted: null,
+      pendingRequestId: null,
+    };
   }
 }
 
-/** Creates the account and immediately signs the browser in via a session cookie. */
-export async function registerAccount(profile: UserProfile, password: string): Promise<AuthResult> {
-  return postJson('/api/auth/register', { ...profile, password });
+export interface RegisterResult extends AuthResult {
+  /** The onboarding request now sitting in the analyst's queue. */
+  requestId?: string;
+}
+
+/**
+ * Submits the account for bank approval. Unlike before, this does NOT sign the
+ * browser in — registration now creates a PENDING_APPROVAL account and a
+ * LIMITED session that can do nothing but poll `/api/onboarding/status`.
+ */
+export async function registerAccount(
+  profile: UserProfile,
+  password: string,
+  device?: { fingerprint: string; label: string; platform?: string }
+): Promise<RegisterResult> {
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...profile, password, device }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data.error ?? 'Something went wrong. Please try again.' };
+    }
+    return { ok: true, requestId: data.requestId };
+  } catch {
+    return { ok: false, error: 'Could not reach the server. Check your connection and try again.' };
+  }
+}
+
+export interface OnboardingStatus {
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+  requestId: string | null;
+  rejectionReason: string | null;
+  submittedAt: string | null;
+}
+
+/** Polled by `/pending-approval` every few seconds until the analyst decides. */
+export async function getOnboardingStatus(): Promise<OnboardingStatus> {
+  try {
+    const res = await fetch('/api/onboarding/status', { cache: 'no-store' });
+    if (!res.ok) throw new Error('onboarding status failed');
+    return (await res.json()) as OnboardingStatus;
+  } catch {
+    // A failed poll is not a decision — keep the caller waiting rather than
+    // bouncing it to a terminal screen on one dropped request.
+    return { status: null, requestId: null, rejectionReason: null, submittedAt: null };
+  }
 }
 
 /** Password login by mobile number or email. Issues a session on success. */
